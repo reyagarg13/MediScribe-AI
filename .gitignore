@@ -22,7 +22,7 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
-
+backend/mediscribe-ai-46e03-firebase-adminsdk-fbsvc-52969ed24b.json
 # npm logs
 npm-debug.log*
 yarn-debug.log*

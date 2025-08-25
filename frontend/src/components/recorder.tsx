@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -14,13 +14,22 @@ interface RecorderProps {
 export function Recorder({ onTranscriptionComplete }: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
+  const [permission, setPermission] = useState<string>("unknown");
+  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [logs, setLogs] = useState<string[]>([]);
+  const [liveText, setLiveText] = useState<string>("");
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
-  const durationInterval = useRef<NodeJS.Timeout>();
+  const durationInterval = useRef<NodeJS.Timeout | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  log("Requesting microphone access...");
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  log("Microphone access granted");
+  setPermission("granted");
+  setStatusMessage("Recording started");
       mediaRecorder.current = new MediaRecorder(stream);
       audioChunks.current = [];
 
@@ -33,25 +42,95 @@ export function Recorder({ onTranscriptionComplete }: RecorderProps) {
         const audioUrl = URL.createObjectURL(audioBlob);
         // Here you would typically send the audioBlob to your transcription service
         toast.success("Recording saved!");
-        
-        // Simulate transcription (replace this with actual transcription service)
-        setTimeout(() => {
-          onTranscriptionComplete?.(
-            "This is a simulated transcription. Replace this with actual transcription service integration."
-          );
-        }, 1000);
+        log("Recording stopped, uploading audio to backend for transcription...");
+
+        // Upload to backend /transcribe (FastAPI) - fallback/verification
+        (async () => {
+          try {
+            const fd = new FormData();
+            fd.append("file", audioBlob, `recording-${Date.now()}.wav`);
+            const res = await fetch("http://localhost:8000/transcribe", {
+              method: "POST",
+              body: fd,
+            });
+            if (!res.ok) {
+              const text = await res.text();
+              log(`Transcription upload failed: ${res.status} ${text}`);
+              toast.error("Transcription failed on server");
+              return;
+            }
+            const data = await res.json();
+            const finalText = data.transcription || data.summary || "";
+            log(`Server transcription received: ${finalText.slice(0, 120)}`);
+            // If we got a server transcription, prefer it
+            if (finalText) {
+              onTranscriptionComplete?.(finalText);
+            } else if (liveText) {
+              onTranscriptionComplete?.(liveText);
+            }
+          } catch (err) {
+            console.error(err);
+            log(`Upload error: ${String(err)}`);
+            // Fallback to liveText or a friendly message
+            if (liveText) onTranscriptionComplete?.(liveText);
+          }
+        })();
       };
 
       mediaRecorder.current.start();
       setIsRecording(true);
       setDuration(0);
 
+      // Try start SpeechRecognition for live/transient transcription (browser feature)
+      try {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          recognitionRef.current = new SpeechRecognition();
+          recognitionRef.current.continuous = true;
+          recognitionRef.current.interimResults = true;
+          recognitionRef.current.lang = "en-US"; // make configurable later
+          recognitionRef.current.onresult = (ev: any) => {
+            let interim = "";
+            let final = "";
+            for (let i = ev.resultIndex; i < ev.results.length; ++i) {
+              const result = ev.results[i];
+              if (result.isFinal) final += result[0].transcript;
+              else interim += result[0].transcript;
+            }
+            if (interim) {
+              setLiveText((prev) => interim);
+              setStatusMessage("Listening (interim)");
+            }
+            if (final) {
+              setLiveText((prev) => final);
+              log(`Final local recognition: ${final}`);
+              onTranscriptionComplete?.(final);
+            }
+          };
+          recognitionRef.current.onerror = (e: any) => log(`SpeechRecognition error: ${e.error || e.message}`);
+          recognitionRef.current.onend = () => {
+            // If still recording, try to restart recognition
+            if (isRecording) {
+              try { recognitionRef.current.start(); } catch (e) { /* ignore */ }
+            }
+          };
+          recognitionRef.current.start();
+          log("SpeechRecognition started for live transcription (if supported)");
+        } else {
+          log("SpeechRecognition not supported in this browser");
+        }
+      } catch (err) {
+        log(`SpeechRecognition init error: ${String(err)}`);
+      }
+
       durationInterval.current = setInterval(() => {
         setDuration((prev) => prev + 1);
-      }, 1000);
+      }, 1000) as unknown as NodeJS.Timeout;
     } catch (error) {
-      console.error("Error accessing microphone:", error);
-      toast.error("Could not access microphone");
+  console.error("Error accessing microphone:", error);
+  log(`Error accessing microphone: ${String(error)}`);
+  setPermission("denied");
+  toast.error("Could not access microphone");
     }
   };
 
@@ -59,8 +138,23 @@ export function Recorder({ onTranscriptionComplete }: RecorderProps) {
     if (mediaRecorder.current && isRecording) {
       mediaRecorder.current.stop();
       mediaRecorder.current.stream.getTracks().forEach((track) => track.stop());
-      clearInterval(durationInterval.current);
+      if (durationInterval.current) {
+        clearInterval(durationInterval.current);
+        durationInterval.current = null;
+      }
       setIsRecording(false);
+      setStatusMessage("Recording stopped");
+      // stop speech recognition
+      try {
+        if (recognitionRef.current) {
+          recognitionRef.current.onend = null;
+          recognitionRef.current.stop();
+          recognitionRef.current = null;
+          log("SpeechRecognition stopped");
+        }
+      } catch (e) {
+        /* ignore */
+      }
     }
   };
 
@@ -69,6 +163,29 @@ export function Recorder({ onTranscriptionComplete }: RecorderProps) {
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
+
+  const log = (message: string) => {
+    const ts = new Date().toLocaleTimeString();
+    const entry = `[${ts}] ${message}`;
+    console.log(entry);
+    setLogs((prev) => [entry, ...prev].slice(0, 20));
+  };
+
+  useEffect(() => {
+    // Try to query permissions where available
+    (async () => {
+      try {
+        if ((navigator as any).permissions && (navigator as any).permissions.query) {
+          const status = await (navigator as any).permissions.query({ name: "microphone" });
+          setPermission(status.state);
+          status.onchange = () => setPermission(status.state);
+        }
+      } catch (e) {
+        // Not all browsers support the permissions API for microphone
+        setPermission("unknown");
+      }
+    })();
+  }, []);
 
   return (
     <Card className="w-full max-w-md p-6 space-y-4 bg-zinc-900 border-zinc-800">
@@ -89,14 +206,23 @@ export function Recorder({ onTranscriptionComplete }: RecorderProps) {
           </Button>
         </div>
 
-        {isRecording && (
-          <div className="w-full space-y-2">
-            <Progress value={duration % 60 * (100 / 60)} className="h-2" />
-            <p className="text-center text-sm text-zinc-400">
-              Recording: {formatDuration(duration)}
-            </p>
-          </div>
-        )}
+        <div className="w-full space-y-2">
+          {isRecording && <Progress value={(duration % 60) * (100 / 60)} className="h-2" />}
+          <p className="text-center text-sm text-zinc-400">{isRecording ? `Recording: ${formatDuration(duration)}` : "Idle"}</p>
+          <p className="text-center text-xs text-zinc-500">Permission: {permission} {statusMessage ? `• ${statusMessage}` : ""}</p>
+          {liveText && (
+            <p className="text-center text-sm text-zinc-300">{liveText}</p>
+          )}
+        </div>
+
+        {/* Simple log panel for debugging */}
+        <div className="w-full mt-2 p-2 bg-zinc-950 border border-zinc-800 rounded text-xs text-zinc-500 h-28 overflow-auto">
+          {logs.length === 0 ? (
+            <div>No logs yet</div>
+          ) : (
+            logs.map((l, idx) => <div key={idx}>{l}</div>)
+          )}
+        </div>
       </div>
     </Card>
   );

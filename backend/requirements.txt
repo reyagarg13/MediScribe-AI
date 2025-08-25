@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+whisper
+sonner
+python-dotenv
+psycopg2-binary
+firebase-admin
+requests
