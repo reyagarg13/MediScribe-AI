@@ -3,27 +3,24 @@
 import { Recorder } from "@/components/recorder";
 import { TranscriptionList } from "@/components/transcription-list";
 import { useState } from "react";
+import { ImageUpload } from "@/components/image-upload";
 
-// Example transcriptions for demonstration
-const demoTranscriptions = [
-  {
-    id: "1",
-    text: "Patient presents with symptoms of seasonal allergies including runny nose, watery eyes, and occasional sneezing.",
-    timestamp: "2024-03-20 14:30",
-    duration: "1:45"
-  },
-  {
-    id: "2",
-    text: "Follow-up appointment scheduled for next week. Prescribed antihistamines and recommended using a humidifier at night.",
-    timestamp: "2024-03-20 14:25",
-    duration: "2:30"
-  }
-];
+type Transcription = {
+  id: string;
+  text: string;
+  timestamp: string;
+  duration: string;
+};
 
-export default function Home() {
+const demoTranscriptions: Transcription[] = [];
+
+ 
+
+export default function Page() {
   const [currentTranscription, setCurrentTranscription] = useState<string>("");
   const [transcriptions, setTranscriptions] = useState(demoTranscriptions);
-  
+  const [imageResult, setImageResult] = useState<any>(null);
+
   const handleTranscriptionComplete = (text: string) => {
     setCurrentTranscription(text);
     // Add to transcriptions list
@@ -33,7 +30,7 @@ export default function Home() {
       timestamp: new Date().toLocaleString(),
       duration: "0:00" // You can pass the actual duration from the recorder
     };
-    setTranscriptions(prev => [newTranscription, ...prev]);
+    setTranscriptions((prev: Transcription[]) => [newTranscription, ...prev]);
   };
 
   return (
@@ -41,9 +38,8 @@ export default function Home() {
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="text-center space-y-4">
           <h1 className="text-4xl font-bold tracking-tight">MediScribe</h1>
-          <p className="text-zinc-400">Record and transcribe your voice with ease</p>
+          <p className="text-zinc-400">Record and transcribe your voice, and analyze medical images with AI</p>
         </div>
-        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div>
             <Recorder onTranscriptionComplete={handleTranscriptionComplete} />
@@ -54,6 +50,10 @@ export default function Home() {
               transcriptions={transcriptions}
             />
           </div>
+        </div>
+        <div className="mt-8">
+          <h2 className="text-2xl font-semibold mb-4">Medical Image Analysis</h2>
+          <ImageUpload onResult={setImageResult} />
         </div>
       </div>
     </div>
