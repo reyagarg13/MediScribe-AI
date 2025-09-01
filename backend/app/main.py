@@ -81,9 +81,16 @@ def list_sessions():
             } for s in sessions
         ]
 
+# Configure CORS: allow specific dev origins by default, but allow overriding
+allow_all = os.getenv("ALLOW_ALL_ORIGINS", "false").lower() in ("1", "true", "yes")
+if allow_all:
+    cors_origins = ["*"]
+else:
+    cors_origins = ["http://localhost:5173", "http://localhost:3000", "http://localhost:4200"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:4200"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

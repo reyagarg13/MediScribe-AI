@@ -47,12 +47,23 @@ export function Recorder({ onTranscriptionComplete }: RecorderProps) {
         // Upload to backend /transcribe (FastAPI) - fallback/verification
         (async () => {
           try {
+            const API_BASE = (window as any).NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+            const proxyUrl = "/api/proxy/transcribe";
             const fd = new FormData();
             fd.append("file", audioBlob, `recording-${Date.now()}.wav`);
-            const res = await fetch("http://localhost:8000/transcribe", {
-              method: "POST",
-              body: fd,
-            });
+            // Try uploading via Next.js proxy first to avoid CORS issues from the browser
+            log(`Uploading to proxy ${proxyUrl}`);
+            let res = null;
+            try {
+              res = await fetch(proxyUrl, { method: "POST", body: fd });
+            } catch (proxyErr) {
+              log(`Proxy upload failed, falling back to direct backend: ${String(proxyErr)}`);
+            }
+
+            if (!res) {
+              log(`Uploading directly to ${API_BASE}/transcribe`);
+              res = await fetch(`${API_BASE}/transcribe`, { method: "POST", body: fd });
+            }
             if (!res.ok) {
               const text = await res.text();
               log(`Transcription upload failed: ${res.status} ${text}`);
@@ -71,6 +82,7 @@ export function Recorder({ onTranscriptionComplete }: RecorderProps) {
           } catch (err) {
             console.error(err);
             log(`Upload error: ${String(err)}`);
+            toast.error("Failed to upload recording: check backend / CORS / network");
             // Fallback to liveText or a friendly message
             if (liveText) onTranscriptionComplete?.(liveText);
           }
