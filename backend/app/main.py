@@ -7,6 +7,7 @@ from .nlp import summarize_text
 from .db import get_db, init_db
 from .image_analysis import router as image_router
 from fastapi.middleware.cors import CORSMiddleware
+import json
 
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -178,6 +179,78 @@ def list_transcriptions(session_id: int):
                 "audio_path": r[1],
                 "transcription": r[2],
                 "summary": r[3],
+                "created_at": r[4]
+            } for r in rows
+        ]
+
+
+# Add prescription OCR result to session
+@app.post("/sessions/{session_id}/prescription-ocr")
+async def add_prescription_ocr_to_session(session_id: int, file: UploadFile = File(...)):
+    # Save the uploaded image temporarily
+    image_path = f"temp_prescription_{session_id}_{file.filename}"
+    with open(image_path, "wb") as f:
+        f.write(await file.read())
+    
+    # Process with OCR
+    try:
+        from .prescription_ocr import analyze_prescription_image
+        with open(image_path, "rb") as img_file:
+            result = analyze_prescription_image(img_file.read())
+        
+        # Store in database
+        with get_db() as conn:
+            if hasattr(conn, "add_prescription_ocr"):
+                # Firestore method (if implemented)
+                try:
+                    conn.add_prescription_ocr(str(session_id), image_path, result["ocr_text"], result["medications"])
+                except Exception as e:
+                    print("Firestore add_prescription_ocr failed:", e)
+            else:
+                # SQLite/Postgres
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO prescription_ocr_results (session_id, image_path, ocr_text, medications) VALUES (?, ?, ?, ?)",
+                    (session_id, image_path, result["ocr_text"], json.dumps(result["medications"]))
+                )
+                conn.commit()
+        
+        # Clean up temp file
+        try:
+            os.remove(image_path)
+        except:
+            pass
+            
+        return result
+    
+    except Exception as e:
+        # Clean up temp file on error
+        try:
+            os.remove(image_path)
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# List all prescription OCR results for a session
+@app.get("/sessions/{session_id}/prescription-ocr")
+def list_prescription_ocr_results(session_id: int):
+    with get_db() as conn:
+        if hasattr(conn, "list_prescription_ocr"):
+            return conn.list_prescription_ocr(str(session_id))
+
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, image_path, ocr_text, medications, created_at FROM prescription_ocr_results WHERE session_id = ? ORDER BY created_at DESC",
+            (session_id,)
+        )
+        rows = cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "image_path": r[1],
+                "ocr_text": r[2],
+                "medications": json.loads(r[3]) if r[3] else [],
                 "created_at": r[4]
             } for r in rows
         ]

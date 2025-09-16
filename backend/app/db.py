@@ -99,6 +99,19 @@ def init_db():
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prescription_ocr_results (
+                    id SERIAL PRIMARY KEY,
+                    session_id INTEGER,
+                    image_path TEXT,
+                    ocr_text TEXT,
+                    medications JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id)
+                )
+                """
+            )
             try:
                 cur.close()
             except Exception:
@@ -122,6 +135,17 @@ def init_db():
                     audio_path TEXT,
                     transcription TEXT,
                     summary TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS prescription_ocr_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER,
+                    image_path TEXT,
+                    ocr_text TEXT,
+                    medications TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(session_id) REFERENCES sessions(id)
                 )
