@@ -255,3 +255,58 @@ def list_prescription_ocr_results(session_id: int):
             } for r in rows
         ]
 
+
+# Standalone prescription analysis endpoint
+@app.post("/analyze_prescription")
+async def analyze_prescription(file: UploadFile = File(...)):
+    """
+    Analyze a prescription image and extract structured medication data.
+    
+    Accepts: PNG, JPG, JPEG images
+    Returns: JSON with extracted medications and their details
+    """
+    try:
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="File must be an image (PNG, JPG, JPEG)")
+        
+        allowed_types = ["image/png", "image/jpeg", "image/jpg"]
+        if file.content_type.lower() not in allowed_types:
+            raise HTTPException(status_code=400, detail="Unsupported image format. Please upload PNG or JPG files.")
+        
+        # Read the uploaded file
+        image_bytes = await file.read()
+        
+        if len(image_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        
+        # Process with prescription OCR
+        from .prescription_ocr import analyze_prescription_image
+        result = analyze_prescription_image(image_bytes)
+        
+        return {
+            "success": True,
+            "filename": file.filename,
+            "file_size": len(image_bytes),
+            "medications": result.get("medications", []),
+            "method": result.get("method", "unknown"),
+            "processing_time": result.get("processing_time"),
+            "total_medications_found": len(result.get("medications", [])),
+            "ocr_text": result.get("ocr_text", ""),
+            "confidence_scores": [
+                {
+                    "medication": med.get("matched_name", med.get("name_candidate", "Unknown")),
+                    "confidence": med.get("confidence", "low"),
+                    "match_score": med.get("match_score", 0)
+                }
+                for med in result.get("medications", [])
+            ]
+        }
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        # Log the error (in production, use proper logging)
+        print(f"Prescription analysis error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze prescription: {str(e)}")
+

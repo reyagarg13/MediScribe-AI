@@ -8,6 +8,10 @@ import json
 import requests
 from typing import Optional, Dict, Any
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request as GoogleRequest
 
@@ -82,3 +86,102 @@ def analyze_text(prompt: str, params: Optional[Dict[str, Any]] = None) -> Dict[s
     resp = requests.post(GEMINI_API_URL, json=payload, headers=headers, timeout=60)
     resp.raise_for_status()
     return resp.json()
+
+
+def analyze_prescription_image(image_bytes: bytes) -> Dict[str, Any]:
+    """Analyze prescription image using Gemini Vision API."""
+    if not available():
+        raise RuntimeError("Gemini not configured (set FIREBASE_CREDENTIALS_PATH or GEMINI_API_KEY and GEMINI_API_URL)")
+    
+    # Use Vision URL if available, otherwise use standard URL
+    vision_url = os.getenv("GEMINI_VISION_URL", GEMINI_API_URL)
+    
+    # Convert image to base64
+    import base64
+    image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Prepare headers
+    headers = {"Content-Type": "application/json"}
+    
+    # For Google's Generative AI API, use API key directly
+    if GEMINI_API_KEY:
+        # Use the key as query parameter for Google's API
+        vision_url = f"{vision_url}?key={GEMINI_API_KEY}"
+    else:
+        token = _get_access_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        else:
+            raise RuntimeError("No authentication method available (need GEMINI_API_KEY or service account)")
+    
+    # Prescription analysis prompt
+    prompt = """Analyze this prescription image and extract medication information. For each medication found, provide:
+1. Medication name
+2. Dosage (strength/amount)
+3. Frequency (how often to take)
+4. Duration (how long to take)
+
+Please be accurate and only extract medications that are clearly visible. Format your response as a structured list.
+
+Example format:
+* **Medication Name:** [Name]
+* **Dosage:** [Strength]
+* **Frequency:** [How often]
+* **Duration:** [How long]
+
+Focus on handwritten prescription text."""
+    
+    # Prepare payload for Google's Generative AI Vision API
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": image_b64
+                        }
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "topK": 32,
+            "topP": 1,
+            "maxOutputTokens": 2048,
+        }
+    }
+    
+    try:
+        response = requests.post(vision_url, json=payload, headers=headers, timeout=60)
+        response.raise_for_status()
+        
+        result = response.json()
+        
+        # Extract text from Google's response format
+        if "candidates" in result and len(result["candidates"]) > 0:
+            candidate = result["candidates"][0]
+            if "content" in candidate and "parts" in candidate["content"]:
+                text_parts = candidate["content"]["parts"]
+                analysis_text = ""
+                for part in text_parts:
+                    if "text" in part:
+                        analysis_text += part["text"] + "\n"
+                
+                return {
+                    "analysis": analysis_text.strip(),
+                    "raw_response": result
+                }
+        
+        return {
+            "analysis": "",
+            "raw_response": result,
+            "error": "No text content found in response"
+        }
+        
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Gemini Vision API request failed: {str(e)}")
+    except Exception as e:
+        raise RuntimeError(f"Gemini Vision API error: {str(e)}")
