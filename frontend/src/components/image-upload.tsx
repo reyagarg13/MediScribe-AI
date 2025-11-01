@@ -1,7 +1,6 @@
 import { useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Upload, FileImage, Pill, Eye, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 
 export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
@@ -11,7 +10,8 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [analysisStage, setAnalysisStage] = useState<string>("");
+  const [analysisStartTime, setAnalysisStartTime] = useState<number | null>(null);
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
   // New: allow switching between endpoints (image analysis vs prescription OCR)
@@ -30,23 +30,36 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
     setImageUrl(URL.createObjectURL(file));
     setLoading(true);
     setError(null);
-    setUploadProgress(0);
+    setAnalysisStartTime(Date.now());
+    
+    // Set analysis stages with realistic timing
+    const stages = [
+      { text: "Processing image", duration: 1000 },
+      { text: "Extracting text", duration: 1200 },
+      { text: "Analyzing prescription", duration: 1500 },
+      { text: "Identifying medications", duration: 1000 }
+    ];
+    
+    let currentStageIndex = 0;
+    setAnalysisStage(stages[0].text);
+    
+    const stageTimeouts: NodeJS.Timeout[] = [];
+    let cumulativeTime = 0;
+    
+    stages.forEach((stage, index) => {
+      if (index > 0) {
+        cumulativeTime += stages[index - 1].duration;
+        const timeout = setTimeout(() => {
+          setAnalysisStage(stage.text);
+        }, cumulativeTime);
+        stageTimeouts.push(timeout);
+      }
+    });
     
     const formData = new FormData();
     formData.append("file", file);
     
     try {
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 200);
-
       let endpoint: string;
       let requestBody: FormData | string = formData;
       
@@ -81,8 +94,8 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
         }
       });
       
-      clearInterval(progressInterval);
-      setUploadProgress(100);
+      // Clear all stage timeouts
+      stageTimeouts.forEach(timeout => clearTimeout(timeout));
       
       if (!res.ok) {
         const text = await res.text();
@@ -91,14 +104,25 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
       const data = await res.json();
       console.log("📋 Backend response:", data);
       console.log("📋 Medications array:", data.medications);
-      setResult(data);
-      onResult(data);
+      
+      // Show completion message briefly
+      const analysisTime = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : "0";
+      setAnalysisStage(`Analyzed in ${analysisTime}s`);
+      
+      setTimeout(() => {
+        setResult(data);
+        onResult(data);
+      }, 1000);
+      
     } catch (err: any) {
+      stageTimeouts.forEach(timeout => clearTimeout(timeout));
       console.error("Image analysis failed:", err);
       setError(err?.message || String(err));
     } finally {
-      setLoading(false);
-      setTimeout(() => setUploadProgress(0), 1000);
+      setTimeout(() => {
+        setLoading(false);
+        setAnalysisStage("");
+      }, 1500);
     }
   };
 
@@ -132,6 +156,7 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
   const renderPrescriptionResult = (data: any) => {
     // Handle both basic and advanced response formats
     const medications = data.medications || [];
+    const prescriptionHeader = data.prescription_header || {};
     const safetyReport = data.safety_report;
     const validationResults = data.validation_results;
     const isAdvanced = data.method === "advanced_ocr_with_validation";
@@ -147,6 +172,78 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
 
     return (
       <div className="space-y-4">
+        {/* Prescription Header Information */}
+        {Object.keys(prescriptionHeader).length > 0 && (
+          <div className="bg-gradient-to-r from-indigo-900/20 to-blue-900/20 p-4 rounded-lg border border-indigo-800">
+            <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+              <FileImage className="w-5 h-5 text-indigo-400" />
+              Prescription Information
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              {prescriptionHeader.patient_name && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Patient Name</div>
+                  <div className="text-white font-medium">{prescriptionHeader.patient_name}</div>
+                </div>
+              )}
+              {prescriptionHeader.patient_age && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Age</div>
+                  <div className="text-white font-medium">{prescriptionHeader.patient_age}</div>
+                </div>
+              )}
+              {prescriptionHeader.patient_sex && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Sex</div>
+                  <div className="text-white font-medium">{prescriptionHeader.patient_sex}</div>
+                </div>
+              )}
+              {prescriptionHeader.prescription_date && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Prescription Date</div>
+                  <div className="text-white font-medium">{prescriptionHeader.prescription_date}</div>
+                </div>
+              )}
+              {prescriptionHeader.doctor_name && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Doctor</div>
+                  <div className="text-white font-medium">{prescriptionHeader.doctor_name}</div>
+                </div>
+              )}
+              {prescriptionHeader.clinic_name && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Clinic</div>
+                  <div className="text-white font-medium">{prescriptionHeader.clinic_name}</div>
+                </div>
+              )}
+              {prescriptionHeader.patient_dob && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Date of Birth</div>
+                  <div className="text-white font-medium">{prescriptionHeader.patient_dob}</div>
+                </div>
+              )}
+              {prescriptionHeader.clinic_address && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Clinic Address</div>
+                  <div className="text-white font-medium">{prescriptionHeader.clinic_address}</div>
+                </div>
+              )}
+              {prescriptionHeader.phone && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Phone</div>
+                  <div className="text-white font-medium">{prescriptionHeader.phone}</div>
+                </div>
+              )}
+              {prescriptionHeader.prescription_number && (
+                <div className="bg-zinc-800/50 p-3 rounded">
+                  <div className="text-zinc-400 text-xs">Prescription #</div>
+                  <div className="text-white font-medium">{prescriptionHeader.prescription_number}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Safety Score (Advanced mode only) */}
         {isAdvanced && safetyReport && (
           <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 p-4 rounded-lg border border-blue-800">
@@ -243,11 +340,14 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
               </div>
 
               {/* Medication Details */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-3">
-                {med.dosage && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm mb-3">
+                {/* Show complete dosage if available, otherwise fall back to simple dosage */}
+                {(med.complete_dosage || med.dosage) && (
                   <div>
-                    <span className="text-zinc-400">Dosage:</span>
-                    <span className="ml-1 text-zinc-200">{med.dosage}</span>
+                    <span className="text-zinc-400">Complete Dosage:</span>
+                    <span className="ml-1 text-zinc-200 font-medium">
+                      {med.complete_dosage || med.dosage}
+                    </span>
                   </div>
                 )}
                 {med.frequency && (
@@ -266,6 +366,13 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
                   <div>
                     <span className="text-zinc-400">Route:</span>
                     <span className="ml-1 text-zinc-200">{med.route}</span>
+                  </div>
+                )}
+                {/* Show simple dosage separately if we also have complete dosage */}
+                {med.complete_dosage && med.dosage && med.complete_dosage !== med.dosage && (
+                  <div>
+                    <span className="text-zinc-400">Extracted Dosage:</span>
+                    <span className="ml-1 text-zinc-200 text-xs opacity-75">{med.dosage}</span>
                   </div>
                 )}
               </div>
@@ -484,16 +591,37 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
           </div>
         </div>
 
-        {/* Upload Progress */}
-        {loading && uploadProgress > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">
-                {ocrMode === "prescription" ? "Extracting prescription..." : "Analyzing image..."}
-              </span>
-              <span className="text-zinc-300">{uploadProgress}%</span>
+        {/* Modern Pulsing Analysis Animation */}
+        {loading && analysisStage && (
+          <div className="space-y-4 py-8">
+            <div className="flex flex-col items-center justify-center space-y-4">
+              {/* ChatGPT-style thinking animation */}
+              <div className="flex items-center space-x-4">
+                {/* Animated thinking dots */}
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+                
+                {/* Glowing analysis text with breathing effect */}
+                <div className="relative">
+                  <span className="text-blue-400 font-medium text-lg animate-pulse drop-shadow-lg">
+                    {analysisStage}
+                  </span>
+                  {/* Glow effect */}
+                  <div className="absolute inset-0 text-blue-400 font-medium text-lg animate-pulse opacity-30 blur-sm">
+                    {analysisStage}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Subtle glowing line with wave animation */}
+              <div className="relative w-32 h-px bg-gradient-to-r from-transparent via-blue-400 to-transparent opacity-60 animate-pulse">
+                {/* Additional glow layer */}
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-300 to-transparent opacity-40 blur-sm animate-pulse"></div>
+              </div>
             </div>
-            <Progress value={uploadProgress} className="h-2" />
           </div>
         )}
 

@@ -78,57 +78,77 @@ def analyze_prescription_image(image_bytes: bytes) -> Dict[str, Any]:
     # Configure the client
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # Prescription analysis prompt
-    prompt = """You are a medical document analysis expert. I need you to carefully examine this prescription image and extract ALL prescribed items with complete accuracy.
+    # Enhanced prescription analysis prompt that extracts complete prescription information
+    prompt = """You are a medical document analysis expert. I need you to carefully examine this prescription image and extract COMPLETE prescription information including both header details and all prescribed items.
 
 ## TASK OVERVIEW:
-Analyze this prescription image which may contain:
-- Traditional pharmaceutical medications (pills, tablets, liquids, injections)
-- Over-the-counter medicines and supplements
-- Alternative therapies and wellness recommendations  
-- Lifestyle modifications and therapeutic activities
-- Medical devices or equipment recommendations
+Analyze this prescription image to extract:
+1. **PRESCRIPTION HEADER INFORMATION** (patient details, doctor info, clinic info, dates)
+2. **ALL PRESCRIBED ITEMS** (medications, therapies, recommendations)
 
-## DETAILED INSTRUCTIONS:
+## SECTION 1: PRESCRIPTION HEADER EXTRACTION
+First, look for and extract prescription header information:
 
-1. **EXAMINE THE IMAGE CAREFULLY**: Look for handwritten text, printed text, checkboxes, symbols, and any medical terminology
+**PATIENT INFORMATION:**
+- Patient Name: [Extract full name if visible]
+- Patient Age: [Extract age if visible]
+- Patient Sex/Gender: [Extract if visible - M/F/Male/Female]
+- Date of Birth: [Extract if visible]
 
-2. **IDENTIFY ALL PRESCRIBED ITEMS**: Extract everything that appears to be prescribed, recommended, or checked off by the healthcare provider
+**DOCTOR/CLINIC INFORMATION:**
+- Doctor Name: [Extract prescribing doctor's name]
+- Clinic/Hospital Name: [Extract facility name if visible]
+- Clinic Address: [Extract if visible]
+- Phone Number: [Extract if visible]
 
-3. **FOR EACH ITEM FOUND**, provide the following information:
-   - **Item Name**: The exact name as written (medication name, activity, recommendation)
-   - **Dosage/Amount**: Any strength, quantity, or measurement specified (e.g., "500mg", "twice", "10 minutes", "as needed")
-   - **Frequency**: How often it should be taken/done (e.g., "twice daily", "every 8 hours", "as needed", "weekly")
-   - **Duration**: How long to continue (e.g., "7 days", "2 weeks", "ongoing", "until symptoms improve")
+**PRESCRIPTION DETAILS:**
+- Prescription Date: [Extract date when prescription was written]
+- Prescription Number: [Extract if visible]
+
+## SECTION 2: PRESCRIBED ITEMS EXTRACTION
+Then extract all prescribed items with complete dosage information:
+
+**FOR EACH PRESCRIBED ITEM:**
+- **Item Name**: The exact medication/therapy name as written
+- **Complete Dosage**: Full dosage description exactly as written (e.g., "1 cap 3x a day", "500mg twice daily", "2 tablets every 8 hours")
+- **Frequency**: How often (e.g., "3x a day", "twice daily", "every 8 hours", "as needed")
+- **Duration**: How long (e.g., "7 days", "2 weeks", "until symptoms improve")
 
 ## OUTPUT FORMAT:
-Use this exact structure for each item:
+Structure your response exactly like this:
 
-1. **Item Name:** [Exact name as written on prescription]
-   **Dosage:** [Strength/amount if specified, or "Not specified"]
-   **Frequency:** [How often, or "Not specified"] 
-   **Duration:** [How long, or "Not specified"]
+=== PRESCRIPTION HEADER ===
+**Patient Name:** [Name or "Not visible"]
+**Patient Age:** [Age or "Not visible"]
+**Patient Sex:** [M/F or "Not visible"]
+**Date of Birth:** [DOB or "Not visible"]
+**Doctor Name:** [Doctor name or "Not visible"]
+**Clinic Name:** [Clinic name or "Not visible"]
+**Clinic Address:** [Address or "Not visible"]
+**Phone:** [Phone or "Not visible"]
+**Prescription Date:** [Date or "Not visible"]
+**Prescription Number:** [Number or "Not visible"]
+
+=== PRESCRIBED MEDICATIONS ===
+1. **Item Name:** [Exact name as written]
+   **Complete Dosage:** [Full dosage exactly as written - preserve original wording]
+   **Frequency:** [How often]
+   **Duration:** [How long]
 
 2. **Item Name:** [Next item...]
-   **Dosage:** [...]
+   **Complete Dosage:** [...]
    **Frequency:** [...]
    **Duration:** [...]
 
-## IMPORTANT GUIDELINES:
-- Be extremely precise - copy text exactly as it appears
-- If handwriting is unclear, provide your best interpretation
-- Include ANY item that appears to be prescribed or recommended
-- If dosage/frequency/duration is not specified for an item, write "Not specified"
-- If you cannot read certain text clearly, indicate this with "[unclear text]"
-- Do not make assumptions - only extract what you can actually see
-- Maintain the numbered list format for easy parsing
+## CRITICAL INSTRUCTIONS:
+- **PRESERVE EXACT WORDING**: For dosages, copy the complete text exactly as written (e.g., "1 cap 3x a day" not "3x daily")
+- **READ CAREFULLY**: Look at the entire prescription - header, body, margins, stamps
+- **BE PRECISE**: Extract text exactly as it appears, including abbreviations and medical shorthand
+- **HANDLE UNCLEAR TEXT**: If text is unclear, indicate with "[unclear: possibly XYZ]"
+- **INCLUDE EVERYTHING**: Extract all visible patient info, doctor info, and prescribed items
+- **MAINTAIN FORMAT**: Follow the exact output structure shown above
 
-## EXAMPLES:
-- Traditional: "Amoxicillin 500mg - Take twice daily for 10 days"
-- Wellness: "Deep breathing exercises - Practice for 5 minutes daily"
-- Activity: "Walk 30 minutes - Every day for 2 weeks"
-
-Now please analyze the prescription image and provide the structured extraction following this format exactly."""
+Now please analyze the prescription image and provide the complete structured extraction."""
     
     # Create the image part using the new SDK
     image_part = types.Part.from_bytes(
