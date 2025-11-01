@@ -15,7 +15,14 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
   // New: allow switching between endpoints (image analysis vs prescription OCR)
-  const [ocrMode, setOcrMode] = useState<"image"|"prescription">("prescription");
+  const [ocrMode, setOcrMode] = useState<"image"|"prescription"|"advanced">("prescription");
+  const [advancedSettings, setAdvancedSettings] = useState({
+    validationLevel: "standard",
+    includeSafetyReport: true,
+    patientAge: "",
+    patientConditions: "",
+    isPregnant: false
+  });
 
   const handleFileChange = async (file: File) => {
     if (!file) return;
@@ -40,10 +47,38 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
         });
       }, 200);
 
-      const endpoint = ocrMode === "prescription" ? "/prescription-ocr" : "/analyze-image";
-      const res = await fetch(`${API_BASE}${endpoint}`, {
+      let endpoint: string;
+      let requestBody: FormData | string = formData;
+      
+      if (ocrMode === "advanced") {
+        endpoint = "/prescription-ocr-advanced";
+        // Add advanced parameters to form data
+        if (advancedSettings.patientAge) {
+          formData.append("patient_age", advancedSettings.patientAge);
+        }
+        if (advancedSettings.patientConditions) {
+          formData.append("patient_conditions", advancedSettings.patientConditions);
+        }
+        formData.append("is_pregnant", String(advancedSettings.isPregnant));
+        formData.append("validation_level", advancedSettings.validationLevel);
+        formData.append("include_safety_report", String(advancedSettings.includeSafetyReport));
+      } else {
+        endpoint = ocrMode === "prescription" ? "/prescription-ocr" : "/analyze-image";
+      }
+      
+      const fullUrl = `${API_BASE}${endpoint}`;
+      
+      console.log(`🔗 Attempting to fetch: ${fullUrl}`);
+      console.log(`🔗 Mode: ${ocrMode}`);
+      
+      const res = await fetch(fullUrl, {
         method: "POST",
-        body: formData,
+        body: requestBody,
+        mode: 'cors',
+        credentials: 'omit',
+        headers: {
+          // Don't set Content-Type for FormData, let browser set it
+        }
       });
       
       clearInterval(progressInterval);
@@ -54,6 +89,8 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
         throw new Error(`Server error: ${res.status} ${text}`);
       }
       const data = await res.json();
+      console.log("📋 Backend response:", data);
+      console.log("📋 Medications array:", data.medications);
       setResult(data);
       onResult(data);
     } catch (err: any) {
@@ -93,7 +130,13 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
   }, []);
 
   const renderPrescriptionResult = (data: any) => {
-    if (!data.medications || data.medications.length === 0) {
+    // Handle both basic and advanced response formats
+    const medications = data.medications || [];
+    const safetyReport = data.safety_report;
+    const validationResults = data.validation_results;
+    const isAdvanced = data.method === "advanced_ocr_with_validation";
+
+    if (medications.length === 0) {
       return (
         <div className="flex items-center gap-2 text-zinc-400">
           <AlertTriangle className="w-4 h-4" />
@@ -103,58 +146,194 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
     }
 
     return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-green-400">
-          <CheckCircle className="w-4 h-4" />
-          <span className="font-medium">Found {data.medications.length} medication(s)</span>
-        </div>
-        {data.medications.map((med: any, idx: number) => (
-          <div key={idx} className="bg-zinc-900 p-3 rounded-lg border border-zinc-700">
-            <div className="flex items-start justify-between mb-2">
+      <div className="space-y-4">
+        {/* Safety Score (Advanced mode only) */}
+        {isAdvanced && safetyReport && (
+          <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 p-4 rounded-lg border border-blue-800">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-white">Safety Analysis</h3>
               <div className="flex items-center gap-2">
-                <Pill className="w-4 h-4 text-blue-400" />
-                <span className="font-medium text-white">
-                  {med.matched_name || med.name_candidate || "Unknown medication"}
-                </span>
-              </div>
-              {med.match_score && (
-                <span className={`text-xs px-2 py-1 rounded ${
-                  med.match_score >= 80 ? "bg-green-900 text-green-300" :
-                  med.match_score >= 60 ? "bg-yellow-900 text-yellow-300" :
-                  "bg-red-900 text-red-300"
+                <span className={`text-2xl font-bold ${
+                  safetyReport.overall_safety_score >= 80 ? "text-green-400" :
+                  safetyReport.overall_safety_score >= 60 ? "text-yellow-400" :
+                  "text-red-400"
                 }`}>
-                  {med.match_score}% match
+                  {safetyReport.overall_safety_score}/100
                 </span>
-              )}
+                <span className="text-sm text-zinc-400">Safety Score</span>
+              </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
-              {med.dosage && (
-                <div>
-                  <span className="text-zinc-400">Dosage:</span>
-                  <span className="ml-1 text-zinc-200">{med.dosage}</span>
-                </div>
-              )}
-              {med.frequency && (
-                <div>
-                  <span className="text-zinc-400">Frequency:</span>
-                  <span className="ml-1 text-zinc-200">{med.frequency}</span>
-                </div>
-              )}
-              {med.duration && (
-                <div>
-                  <span className="text-zinc-400">Duration:</span>
-                  <span className="ml-1 text-zinc-200">{med.duration}</span>
-                </div>
-              )}
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400">Total Medications</div>
+                <div className="text-xl font-semibold text-white">{safetyReport.total_medications}</div>
+              </div>
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400">Critical Alerts</div>
+                <div className="text-xl font-semibold text-red-400">{safetyReport.critical_alerts_count}</div>
+              </div>
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400">Warnings</div>
+                <div className="text-xl font-semibold text-yellow-400">{safetyReport.warning_alerts_count}</div>
+              </div>
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400">Issues Found</div>
+                <div className="text-xl font-semibold text-orange-400">{safetyReport.medications_with_issues}</div>
+              </div>
             </div>
-            {med.notes && (
-              <div className="mt-2 text-xs text-amber-400 bg-amber-900/20 p-2 rounded">
-                {med.notes}
+
+            {safetyReport.summary_recommendations && safetyReport.summary_recommendations.length > 0 && (
+              <div className="mt-3">
+                <h4 className="text-sm font-medium text-zinc-200 mb-2">Recommendations:</h4>
+                <ul className="text-sm text-zinc-300 space-y-1">
+                  {safetyReport.summary_recommendations.map((rec: string, idx: number) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-blue-400 mt-1">•</span>
+                      {rec}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
-        ))}
-        {data.ocr_text && (
+        )}
+
+        {/* Medications List */}
+        <div className="flex items-center gap-2 text-green-400">
+          <CheckCircle className="w-4 h-4" />
+          <span className="font-medium">Found {medications.length} medication(s)</span>
+        </div>
+
+        {medications.map((med: any, idx: number) => {
+          const validation = validationResults && validationResults[idx];
+          
+          return (
+            <div key={idx} className="bg-zinc-900 p-4 rounded-lg border border-zinc-700">
+              {/* Medication Header */}
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Pill className="w-4 h-4 text-blue-400" />
+                  <span className="font-medium text-white">
+                    {med.matched_name || med.name_candidate || med.raw_line || "Unknown item"}
+                  </span>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  {med.match_score && (
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      med.match_score >= 80 ? "bg-green-900 text-green-300" :
+                      med.match_score >= 60 ? "bg-yellow-900 text-yellow-300" :
+                      "bg-red-900 text-red-300"
+                    }`}>
+                      {med.match_score}% match
+                    </span>
+                  )}
+                  
+                  {validation && (
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      validation.safety_score >= 80 ? "bg-green-900 text-green-300" :
+                      validation.safety_score >= 60 ? "bg-yellow-900 text-yellow-300" :
+                      "bg-red-900 text-red-300"
+                    }`}>
+                      {validation.safety_score}/100 safety
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Medication Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-3">
+                {med.dosage && (
+                  <div>
+                    <span className="text-zinc-400">Dosage:</span>
+                    <span className="ml-1 text-zinc-200">{med.dosage}</span>
+                  </div>
+                )}
+                {med.frequency && (
+                  <div>
+                    <span className="text-zinc-400">Frequency:</span>
+                    <span className="ml-1 text-zinc-200">{med.frequency}</span>
+                  </div>
+                )}
+                {med.duration && (
+                  <div>
+                    <span className="text-zinc-400">Duration:</span>
+                    <span className="ml-1 text-zinc-200">{med.duration}</span>
+                  </div>
+                )}
+                {med.route && (
+                  <div>
+                    <span className="text-zinc-400">Route:</span>
+                    <span className="ml-1 text-zinc-200">{med.route}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Validation Alerts (Advanced mode only) */}
+              {validation && validation.alerts && validation.alerts.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <h5 className="text-sm font-medium text-zinc-200">Safety Alerts:</h5>
+                  {validation.alerts.map((alert: any, alertIdx: number) => (
+                    <div key={alertIdx} className={`p-2 rounded text-xs ${
+                      alert.level === 'critical' ? 'bg-red-900/20 border border-red-800 text-red-300' :
+                      alert.level === 'warning' ? 'bg-yellow-900/20 border border-yellow-800 text-yellow-300' :
+                      'bg-blue-900/20 border border-blue-800 text-blue-300'
+                    }`}>
+                      <div className="font-medium">{alert.level.toUpperCase()}: {alert.message}</div>
+                      <div className="mt-1 text-zinc-400">{alert.recommendation}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Generic Notes */}
+              {med.notes && (
+                <div className="mt-2 text-xs text-amber-400 bg-amber-900/20 p-2 rounded">
+                  {med.notes}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Processing Information (Advanced mode) */}
+        {isAdvanced && data.ocr_analysis && (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
+              View processing details
+            </summary>
+            <div className="mt-2 p-3 bg-zinc-900 rounded border border-zinc-700">
+              <div className="grid grid-cols-2 gap-4 text-xs mb-3">
+                <div>
+                  <span className="text-zinc-400">Processing Time:</span>
+                  <span className="ml-1 text-zinc-200">{data.processing_time?.toFixed(2)}s</span>
+                </div>
+                <div>
+                  <span className="text-zinc-400">Overall Confidence:</span>
+                  <span className="ml-1 text-zinc-200">{(data.ocr_analysis.overall_confidence * 100).toFixed(1)}%</span>
+                </div>
+              </div>
+              
+              {data.ocr_analysis.processing_stages && (
+                <div className="space-y-2">
+                  <h6 className="text-xs font-medium text-zinc-300">Processing Stages:</h6>
+                  {data.ocr_analysis.processing_stages.map((stage: any, idx: number) => (
+                    <div key={idx} className="flex justify-between text-xs">
+                      <span className="text-zinc-400">{stage.stage.replace('_', ' ')}</span>
+                      <span className={stage.success ? "text-green-400" : "text-red-400"}>
+                        {stage.success ? "✓" : "✗"} {(stage.confidence * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
+        )}
+
+        {/* OCR Text (Basic mode) */}
+        {!isAdvanced && data.ocr_text && (
           <details className="mt-4">
             <summary className="cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
               View raw OCR text
@@ -175,7 +354,7 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
           <FileImage className="w-5 h-5" />
           Medical Image Analysis
         </CardTitle>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button
             variant={ocrMode === "image" ? "default" : "outline"}
             size="sm"
@@ -192,9 +371,82 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
             className="flex items-center gap-2"
           >
             <Pill className="w-4 h-4" />
-            Prescription OCR
+            Basic OCR
+          </Button>
+          <Button
+            variant={ocrMode === "advanced" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setOcrMode("advanced")}
+            className="flex items-center gap-2"
+          >
+            <CheckCircle className="w-4 h-4" />
+            Advanced OCR + Validation
           </Button>
         </div>
+        
+        {/* Advanced Settings Panel */}
+        {ocrMode === "advanced" && (
+          <div className="mt-4 p-4 bg-zinc-800 rounded-lg border border-zinc-700">
+            <h4 className="text-sm font-medium text-zinc-200 mb-3">Advanced Settings</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-zinc-400">Validation Level</label>
+                <select 
+                  value={advancedSettings.validationLevel}
+                  onChange={(e) => setAdvancedSettings(prev => ({...prev, validationLevel: e.target.value}))}
+                  className="w-full mt-1 p-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm"
+                >
+                  <option value="standard">Standard</option>
+                  <option value="comprehensive">Comprehensive</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="text-xs text-zinc-400">Patient Age</label>
+                <input 
+                  type="number"
+                  placeholder="Age (optional)"
+                  value={advancedSettings.patientAge}
+                  onChange={(e) => setAdvancedSettings(prev => ({...prev, patientAge: e.target.value}))}
+                  className="w-full mt-1 p-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm"
+                />
+              </div>
+              
+              <div className="md:col-span-2">
+                <label className="text-xs text-zinc-400">Patient Conditions (comma-separated)</label>
+                <input 
+                  type="text"
+                  placeholder="e.g., diabetes, hypertension, kidney disease"
+                  value={advancedSettings.patientConditions}
+                  onChange={(e) => setAdvancedSettings(prev => ({...prev, patientConditions: e.target.value}))}
+                  className="w-full mt-1 p-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm"
+                />
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm text-zinc-200">
+                  <input 
+                    type="checkbox"
+                    checked={advancedSettings.isPregnant}
+                    onChange={(e) => setAdvancedSettings(prev => ({...prev, isPregnant: e.target.checked}))}
+                    className="rounded"
+                  />
+                  Pregnant Patient
+                </label>
+                
+                <label className="flex items-center gap-2 text-sm text-zinc-200">
+                  <input 
+                    type="checkbox"
+                    checked={advancedSettings.includeSafetyReport}
+                    onChange={(e) => setAdvancedSettings(prev => ({...prev, includeSafetyReport: e.target.checked}))}
+                    className="rounded"
+                  />
+                  Include Safety Report
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Drag and drop area */}
@@ -279,10 +531,10 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
         {result && !loading && (
           <div className="space-y-3">
             <h4 className="font-medium text-zinc-200 flex items-center gap-2">
-              {ocrMode === "prescription" ? (
+              {ocrMode === "prescription" || ocrMode === "advanced" ? (
                 <>
                   <Pill className="w-4 h-4" />
-                  Prescription Analysis
+                  {ocrMode === "advanced" ? "Advanced Prescription Analysis" : "Prescription Analysis"}
                 </>
               ) : (
                 <>
@@ -291,7 +543,7 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
                 </>
               )}
             </h4>
-            {ocrMode === "prescription" ? (
+            {ocrMode === "prescription" || ocrMode === "advanced" ? (
               renderPrescriptionResult(result)
             ) : (
               <div className="bg-zinc-800 p-4 rounded-lg border border-zinc-700">

@@ -341,51 +341,84 @@ def parse_gemini_response(analysis_text: str) -> List[Dict[str, Any]]:
     if not analysis_text:
         return medications
     
+    # Check if Gemini found no medications
+    if "NO_MEDICATIONS_FOUND" in analysis_text.upper():
+        return medications
+    
     # Look for medication patterns in Gemini's response
     lines = analysis_text.split('\n')
     current_medication = {}
+    medication_data = None
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
         
-        # Look for medication entries with better patterns
-        # Pattern 1: Numbered medications (1. Drug name, 2. Drug name)
-        med_match = re.search(r'^\d+\.\s*(.+?)(?:\s+\d+(?:mg|ml|g|mcg|iu|gram|grams?))?', line, re.I)
-        if med_match:
-            drug_name = med_match.group(1).strip()
-            
-            # Clean up common artifacts
-            drug_name = re.sub(r'\(.*?\)', '', drug_name).strip()  # Remove parentheses
-            drug_name = re.sub(r'brand.*|likely.*|medication.*name.*', '', drug_name, flags=re.I).strip()
-            
-            if drug_name:
-                # Extract dosage, frequency, duration from the same line
-                dosage = _extract_dosage(line)
-                frequency = _extract_frequency(line)
-                duration = _extract_duration(line)
+        # Pattern 1: Look for numbered items (1. **Item Name:** ...)
+        if re.match(r'^\d+\.\s*\*\*Item Name:\*\*', line):
+            # Extract the item name
+            name_match = re.search(r'\*\*Item Name:\*\*\s*(.+)', line)
+            if name_match:
+                item_name = name_match.group(1).strip()
                 
-                # Fuzzy match against our drug database
-                fuzzy_result = fuzzy_match_drug(drug_name)
-                
-                medication = {
+                # Initialize medication data
+                medication_data = {
                     "raw_line": line,
-                    "name_candidate": drug_name,
-                    "matched_name": fuzzy_result.get("match"),
-                    "match_score": fuzzy_result.get("score", 0),
-                    "match_candidates": fuzzy_result.get("candidates", []),
-                    "dosage": dosage,
-                    "frequency": frequency,
-                    "duration": duration,
-                    "confidence": "high" if fuzzy_result.get("score", 0) >= 80 else "medium" if fuzzy_result.get("score", 0) >= 60 else "low",
-                    "method": "gemini_vision",
-                    "notes": None,
-                    "warnings": []
+                    "name_candidate": item_name,
+                    "dosage": None,
+                    "frequency": None,
+                    "duration": None
                 }
                 
-                medications.append(medication)
+                # Look ahead for dosage, frequency, duration in subsequent lines
+                current_med_lines = [line]
                 continue
+        
+        # Pattern 2: Look for **Dosage:** **Frequency:** **Duration:** lines
+        if medication_data is not None:
+            if '**Dosage:**' in line:
+                dosage_match = re.search(r'\*\*Dosage:\*\*\s*(.+)', line)
+                if dosage_match:
+                    dosage_text = dosage_match.group(1).strip()
+                    medication_data["dosage"] = dosage_text if dosage_text != "Not specified" else None
+                    
+            elif '**Frequency:**' in line:
+                freq_match = re.search(r'\*\*Frequency:\*\*\s*(.+)', line)
+                if freq_match:
+                    freq_text = freq_match.group(1).strip()
+                    medication_data["frequency"] = freq_text if freq_text != "Not specified" else None
+                    
+            elif '**Duration:**' in line:
+                dur_match = re.search(r'\*\*Duration:\*\*\s*(.+)', line)
+                if dur_match:
+                    duration_text = dur_match.group(1).strip()
+                    medication_data["duration"] = duration_text if duration_text != "Not specified" else None
+                    
+                    # This is the last field, so complete the medication entry
+                    item_name = medication_data["name_candidate"]
+                    
+                    # Fuzzy match against our drug database
+                    fuzzy_result = fuzzy_match_drug(item_name)
+                    
+                    medication = {
+                        "raw_line": medication_data["raw_line"],
+                        "name_candidate": item_name,
+                        "matched_name": fuzzy_result.get("match"),
+                        "match_score": fuzzy_result.get("score", 0),
+                        "match_candidates": fuzzy_result.get("candidates", []),
+                        "dosage": medication_data["dosage"],
+                        "frequency": medication_data["frequency"],
+                        "duration": medication_data["duration"],
+                        "confidence": "high" if fuzzy_result.get("score", 0) >= 80 else "medium" if fuzzy_result.get("score", 0) >= 60 else "low",
+                        "method": "gemini_vision",
+                        "notes": None,
+                        "warnings": []
+                    }
+                    
+                    medications.append(medication)
+                    medication_data = None  # Clean up for next medication
+                    continue
         
         # Pattern 2: Look for explicit medication names in structured output
         if ("medication name" in line.lower() or "drug name" in line.lower()) and ":" in line:

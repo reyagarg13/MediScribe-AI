@@ -82,24 +82,33 @@ def list_sessions():
             } for s in sessions
         ]
 
-# Configure CORS: allow specific dev origins by default, but allow overriding
-allow_all = os.getenv("ALLOW_ALL_ORIGINS", "false").lower() in ("1", "true", "yes")
+# Configure CORS: allow all localhost origins for development
+# For production, set ALLOW_ALL_ORIGINS=false and specify exact origins
+allow_all = os.getenv("ALLOW_ALL_ORIGINS", "true").lower() in ("1", "true", "yes")
 if allow_all:
     cors_origins = ["*"]
 else:
-    cors_origins = ["http://localhost:5173", "http://localhost:3000", "http://localhost:4200"]
+    cors_origins = ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://localhost:4200"]
+
+print(f"🌐 CORS configured - Allow all origins: {allow_all}")
+print(f"🌐 Allowed origins: {cors_origins}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,  # Set to False when using "*" origins
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 @app.get("/")
 def root():
     return {"message": "AI Medical Scribe Backend is running!"}
+
+@app.options("/{path:path}")
+def options_handler(path: str):
+    """Handle preflight OPTIONS requests"""
+    return {"message": "OK"}
 
 
 @app.get("/health")

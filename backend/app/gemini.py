@@ -1,187 +1,205 @@
 """
-Simple Gemini adapter. Uses GEMINI_API_KEY and GEMINI_API_URL env vars.
-This is a minimal example: depending on your chosen Gemini API contract you may
-need to adjust headers, input shape, and response parsing.
+Gemini adapter using the official Google GenAI SDK.
+Uses GEMINI_API_KEY environment variable.
 """
 import os
-import json
-import requests
 from typing import Optional, Dict, Any
 
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-from google.oauth2 import service_account
-from google.auth.transport.requests import Request as GoogleRequest
+try:
+    from google import genai
+    from google.genai import types
+    GENAI_AVAILABLE = True
+except ImportError:
+    genai = None
+    types = None
+    GENAI_AVAILABLE = False
 
-# Use GEMINI_API_URL if provided, otherwise default to the Google Generative Language endpoint
-GEMINI_API_URL = os.getenv(
-    "GEMINI_API_URL",
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-)
-
-# Service account creds (we reuse FIREBASE service account if present)
-FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH")
-FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
-def _get_access_token() -> Optional[str]:
-    """Return an OAuth2 access token using service account JSON if available.
-
-    Falls back to returning None if no service account is configured; in that
-    case if GEMINI_API_KEY is provided it may be used instead (not recommended
-    for production when service accounts are available).
-    """
-    try:
-        if FIREBASE_CREDENTIALS_PATH and os.path.exists(FIREBASE_CREDENTIALS_PATH):
-            creds = service_account.Credentials.from_service_account_file(
-                FIREBASE_CREDENTIALS_PATH, scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-        elif FIREBASE_CREDENTIALS_JSON:
-            info = json.loads(FIREBASE_CREDENTIALS_JSON)
-            creds = service_account.Credentials.from_service_account_info(
-                info, scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-        else:
-            return None
-
-        auth_req = GoogleRequest()
-        creds.refresh(auth_req)
-        return creds.token
-    except Exception as e:
-        # Do not fail hard here; return None and let caller decide
-        print("Failed to obtain access token from service account:", e)
-        return None
-
-
 def available() -> bool:
-    return bool(GEMINI_API_URL and (FIREBASE_CREDENTIALS_PATH or FIREBASE_CREDENTIALS_JSON or GEMINI_API_KEY))
+    """Check if Gemini is available."""
+    return bool(GEMINI_API_KEY and GENAI_AVAILABLE)
 
 
-def analyze_text(prompt: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Send text to Gemini-like endpoint and return JSON response.
-
-    Uses service account token if available, otherwise attempts to use GEMINI_API_KEY
-    as a bearer token (less ideal).
+def analyze_text(text: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Use Gemini to analyze text using the Google GenAI SDK.
     """
     if not available():
-        raise RuntimeError("Gemini not configured (set FIREBASE_CREDENTIALS_PATH or GEMINI_API_KEY and GEMINI_API_URL)")
+        raise RuntimeError("Gemini not configured (set GEMINI_API_KEY and install google-genai)")
 
-    token = _get_access_token()
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    elif GEMINI_API_KEY:
-        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
-
-    # The exact request body depends on the Gemini API contract. We'll send a
-    # simple input wrapper that many examples accept; adapt if you have a
-    # different required schema.
-    payload: Dict[str, Any] = {"input": {"text": prompt}}
-    if params:
-        payload.update(params)
-
-    resp = requests.post(GEMINI_API_URL, json=payload, headers=headers, timeout=60)
-    resp.raise_for_status()
-    return resp.json()
+    # Configure the client
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    prompt = f"Analyze this medical transcription and provide a clinical summary: {text}"
+    
+    # Try multiple models in order of preference
+    models_to_try = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
+    ]
+    
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[prompt]
+            )
+            
+            return {
+                "analysis": response.text,
+                "success": True,
+                "model_used": model_name
+            }
+            
+        except Exception as e:
+            continue
+    
+    # If all models failed
+    return {
+        "analysis": f"Analysis failed: All Gemini models unavailable",
+        "success": False,
+        "error": "All models failed"
+    }
 
 
 def analyze_prescription_image(image_bytes: bytes) -> Dict[str, Any]:
-    """Analyze prescription image using Gemini Vision API."""
+    """Analyze prescription image using Gemini Vision API with the new SDK."""
     if not available():
-        raise RuntimeError("Gemini not configured (set FIREBASE_CREDENTIALS_PATH or GEMINI_API_KEY and GEMINI_API_URL)")
+        raise RuntimeError("Gemini not configured (set GEMINI_API_KEY and install google-genai)")
     
-    # Use Vision URL if available, otherwise use standard URL
-    vision_url = os.getenv("GEMINI_VISION_URL", GEMINI_API_URL)
-    
-    # Convert image to base64
-    import base64
-    image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-    
-    # Prepare headers
-    headers = {"Content-Type": "application/json"}
-    
-    # For Google's Generative AI API, use API key directly
-    if GEMINI_API_KEY:
-        # Use the key as query parameter for Google's API
-        vision_url = f"{vision_url}?key={GEMINI_API_KEY}"
-    else:
-        token = _get_access_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        else:
-            raise RuntimeError("No authentication method available (need GEMINI_API_KEY or service account)")
+    # Configure the client
+    client = genai.Client(api_key=GEMINI_API_KEY)
     
     # Prescription analysis prompt
-    prompt = """Analyze this prescription image and extract medication information. For each medication found, provide:
-1. Medication name
-2. Dosage (strength/amount)
-3. Frequency (how often to take)
-4. Duration (how long to take)
+    prompt = """You are a medical document analysis expert. I need you to carefully examine this prescription image and extract ALL prescribed items with complete accuracy.
 
-Please be accurate and only extract medications that are clearly visible. Format your response as a structured list.
+## TASK OVERVIEW:
+Analyze this prescription image which may contain:
+- Traditional pharmaceutical medications (pills, tablets, liquids, injections)
+- Over-the-counter medicines and supplements
+- Alternative therapies and wellness recommendations  
+- Lifestyle modifications and therapeutic activities
+- Medical devices or equipment recommendations
 
-Example format:
-* **Medication Name:** [Name]
-* **Dosage:** [Strength]
-* **Frequency:** [How often]
-* **Duration:** [How long]
+## DETAILED INSTRUCTIONS:
 
-Focus on handwritten prescription text."""
+1. **EXAMINE THE IMAGE CAREFULLY**: Look for handwritten text, printed text, checkboxes, symbols, and any medical terminology
+
+2. **IDENTIFY ALL PRESCRIBED ITEMS**: Extract everything that appears to be prescribed, recommended, or checked off by the healthcare provider
+
+3. **FOR EACH ITEM FOUND**, provide the following information:
+   - **Item Name**: The exact name as written (medication name, activity, recommendation)
+   - **Dosage/Amount**: Any strength, quantity, or measurement specified (e.g., "500mg", "twice", "10 minutes", "as needed")
+   - **Frequency**: How often it should be taken/done (e.g., "twice daily", "every 8 hours", "as needed", "weekly")
+   - **Duration**: How long to continue (e.g., "7 days", "2 weeks", "ongoing", "until symptoms improve")
+
+## OUTPUT FORMAT:
+Use this exact structure for each item:
+
+1. **Item Name:** [Exact name as written on prescription]
+   **Dosage:** [Strength/amount if specified, or "Not specified"]
+   **Frequency:** [How often, or "Not specified"] 
+   **Duration:** [How long, or "Not specified"]
+
+2. **Item Name:** [Next item...]
+   **Dosage:** [...]
+   **Frequency:** [...]
+   **Duration:** [...]
+
+## IMPORTANT GUIDELINES:
+- Be extremely precise - copy text exactly as it appears
+- If handwriting is unclear, provide your best interpretation
+- Include ANY item that appears to be prescribed or recommended
+- If dosage/frequency/duration is not specified for an item, write "Not specified"
+- If you cannot read certain text clearly, indicate this with "[unclear text]"
+- Do not make assumptions - only extract what you can actually see
+- Maintain the numbered list format for easy parsing
+
+## EXAMPLES:
+- Traditional: "Amoxicillin 500mg - Take twice daily for 10 days"
+- Wellness: "Deep breathing exercises - Practice for 5 minutes daily"
+- Activity: "Walk 30 minutes - Every day for 2 weeks"
+
+Now please analyze the prescription image and provide the structured extraction following this format exactly."""
     
-    # Prepare payload for Google's Generative AI Vision API
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/png",
-                            "data": image_b64
-                        }
-                    }
+    # Create the image part using the new SDK
+    image_part = types.Part.from_bytes(
+        data=image_bytes,
+        mime_type='image/png'
+    )
+    
+    # Try multiple models in order of preference
+    models_to_try = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash-exp', 
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
+    ]
+    
+    for model_name in models_to_try:
+        try:
+            print(f"Trying Gemini model: {model_name}")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[
+                    image_part,
+                    prompt
                 ]
+            )
+            
+            print(f"✅ Successfully used model: {model_name}")
+            return {
+                "analysis": response.text,
+                "success": True,
+                "model_used": model_name
             }
-        ],
-        "generationConfig": {
-            "temperature": 0.1,
-            "topK": 32,
-            "topP": 1,
-            "maxOutputTokens": 2048,
-        }
-    }
+            
+        except Exception as e:
+            print(f"❌ Model {model_name} failed: {str(e)}")
+            continue
     
-    try:
-        response = requests.post(vision_url, json=payload, headers=headers, timeout=60)
-        response.raise_for_status()
-        
-        result = response.json()
-        
-        # Extract text from Google's response format
-        if "candidates" in result and len(result["candidates"]) > 0:
-            candidate = result["candidates"][0]
-            if "content" in candidate and "parts" in candidate["content"]:
-                text_parts = candidate["content"]["parts"]
-                analysis_text = ""
-                for part in text_parts:
-                    if "text" in part:
-                        analysis_text += part["text"] + "\n"
-                
-                return {
-                    "analysis": analysis_text.strip(),
-                    "raw_response": result
-                }
-        
-        return {
-            "analysis": "",
-            "raw_response": result,
-            "error": "No text content found in response"
-        }
-        
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Gemini Vision API request failed: {str(e)}")
-    except Exception as e:
-        raise RuntimeError(f"Gemini Vision API error: {str(e)}")
+    # If all models failed
+    raise RuntimeError(f"All Gemini models failed. Last error: {str(e)}")
+
+
+def analyze_with_gemini(prompt: str) -> str:
+    """
+    Use Gemini to analyze text with a custom prompt using the Google GenAI SDK.
+    Returns the raw text response for flexible parsing.
+    """
+    if not available():
+        raise RuntimeError("Gemini not configured (set GEMINI_API_KEY and install google-genai)")
+
+    # Configure the client
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    # Try multiple models in order of preference
+    models_to_try = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
+    ]
+    
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[prompt]
+            )
+            
+            return response.text
+            
+        except Exception as e:
+            continue
+    
+    # If all models failed
+    raise RuntimeError("All Gemini models failed for text analysis")
