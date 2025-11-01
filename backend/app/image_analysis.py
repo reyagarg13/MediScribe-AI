@@ -147,11 +147,18 @@ async def prescription_ocr_advanced(
             
             medications.append(medication)
         
-        # If no medications found through entities, fall back to original method
+        # Get prescription header information and fallback medications if needed
+        prescription_header = {}
+        
         if not medications:
             from .prescription_ocr import analyze_prescription_image
             fallback_result = analyze_prescription_image(contents)
             medications = fallback_result.get("medications", [])
+            prescription_header = fallback_result.get("prescription_header", {})
+        else:
+            # Extract header from entities if available
+            header_entities = entities.get("headers", {})
+            prescription_header = header_entities
         
         # Medical validation if requested
         validation_results = None
@@ -169,20 +176,22 @@ async def prescription_ocr_advanced(
             if patient_conditions:
                 patient_info["conditions"] = [c.strip() for c in patient_conditions.split(",")]
             
-            # Validate each medication
-            validation_results = []
-            for med in medications:
-                validation = validator.validate_medication(
-                    med, medications, patient_info, 
-                    ValidationLevel.COMPREHENSIVE if validation_level == "comprehensive" else ValidationLevel.STANDARD
-                )
-                validation_results.append(validation)
+            # Use batch validation for better performance
+            validation_level_enum = ValidationLevel.COMPREHENSIVE if validation_level == "comprehensive" else ValidationLevel.STANDARD
+            validation_results = validator.batch_validate_medications(medications, patient_info, validation_level_enum)
             
-            # Generate safety report
-            safety_report = validator.generate_safety_report(medications, patient_info)
+            # Generate safety report using batch validation results
+            safety_report = validator.generate_safety_report_from_validations(validation_results, medications)
         
         # Combine all results
         total_time = time.time() - start_time
+        
+        # Calculate overall confidence from medication matches
+        if medications:
+            medication_scores = [med.get("match_score", 0) for med in medications if med.get("match_score")]
+            overall_confidence = sum(medication_scores) / len(medication_scores) if medication_scores else 75
+        else:
+            overall_confidence = 50
         
         return JSONResponse(content={
             "status": "success",
@@ -197,8 +206,7 @@ async def prescription_ocr_advanced(
             # OCR Results
             "ocr_analysis": {
                 "extracted_text": ocr_result.get("extracted_text", ""),
-                "processing_stages": ocr_result.get("stages", []),
-                "overall_confidence": ocr_result.get("overall_confidence", 0),
+                "overall_confidence": round(overall_confidence, 1),
                 "advanced_features": ocr_result.get("advanced_features", {})
             },
             
@@ -208,6 +216,9 @@ async def prescription_ocr_advanced(
             # Medications
             "medications": medications,
             "medications_found": len(medications),
+            
+            # Prescription Header Information  
+            "prescription_header": prescription_header,
             
             # Medical Validation
             "validation_results": validation_results,

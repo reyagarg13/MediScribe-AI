@@ -44,74 +44,34 @@ class DosageValidation:
 
 
 class MedicalValidator:
-    """Comprehensive medical validation system"""
+    """LLM-powered medical validation system with enhanced drug database integration"""
     
     def __init__(self):
-        self.load_medical_databases()
+        self.load_enhanced_database()
+        self.load_basic_safety_data()
     
-    def load_medical_databases(self):
-        """Load medical validation databases"""
-        
-        # Drug database with safety information
-        self.drug_database = {
-            "amoxicillin": {
-                "generic_name": "amoxicillin",
-                "category": "antibiotic",
-                "standard_dosages": {
-                    "adult": {"min": 250, "max": 1000, "unit": "mg"},
-                    "pediatric": {"min": 20, "max": 50, "unit": "mg/kg"}
-                },
-                "max_daily_dose": 3000,  # mg
-                "contraindications": [
-                    "penicillin allergy",
-                    "severe renal impairment"
-                ],
-                "drug_interactions": [
-                    {"drug": "warfarin", "severity": "moderate", "effect": "increased bleeding risk"},
-                    {"drug": "methotrexate", "severity": "major", "effect": "increased toxicity"}
-                ],
-                "pregnancy_category": "B",
-                "common_side_effects": ["nausea", "diarrhea", "rash"],
-                "black_box_warnings": []
-            },
-            
-            "warfarin": {
-                "generic_name": "warfarin",
-                "category": "anticoagulant",
-                "standard_dosages": {
-                    "adult": {"min": 1, "max": 10, "unit": "mg"},
-                },
-                "max_daily_dose": 15,  # mg
-                "contraindications": [
-                    "active bleeding",
-                    "pregnancy",
-                    "severe liver disease"
-                ],
-                "drug_interactions": [
-                    {"drug": "aspirin", "severity": "major", "effect": "increased bleeding risk"},
-                    {"drug": "amoxicillin", "severity": "moderate", "effect": "increased INR"}
-                ],
-                "pregnancy_category": "X",
-                "monitoring_required": ["INR", "PT"],
-                "black_box_warnings": ["Can cause major or fatal bleeding"]
-            },
-            
-            "insulin": {
-                "generic_name": "insulin",
-                "category": "antidiabetic",
-                "standard_dosages": {
-                    "adult": {"min": 0.1, "max": 2.0, "unit": "units/kg"},
-                },
-                "contraindications": [
-                    "hypoglycemia"
-                ],
-                "drug_interactions": [
-                    {"drug": "beta-blockers", "severity": "moderate", "effect": "masked hypoglycemia"}
-                ],
-                "pregnancy_category": "B",
-                "monitoring_required": ["blood glucose", "HbA1c"],
-                "black_box_warnings": []
-            }
+    def load_enhanced_database(self):
+        """Load enhanced drug database for validation"""
+        try:
+            from .drug_database import drug_db, search_drug_enhanced
+            self.enhanced_db = drug_db
+            self.search_drug_enhanced = search_drug_enhanced
+            self.enhanced_db_available = True
+            print("✅ Enhanced drug database loaded for medical validation")
+        except ImportError:
+            self.enhanced_db = None
+            self.search_drug_enhanced = None
+            self.enhanced_db_available = False
+            print("❌ Enhanced drug database not available for validation")
+    
+    def load_basic_safety_data(self):
+        """Load basic safety data for critical medications"""
+        # Keep minimal critical safety data for high-risk drugs
+        self.critical_drugs = {
+            "warfarin": {"monitoring": ["INR"], "black_box": True},
+            "insulin": {"monitoring": ["glucose"], "black_box": False},
+            "digoxin": {"monitoring": ["level", "ECG"], "black_box": True},
+            "lithium": {"monitoring": ["level", "renal"], "black_box": True}
         }
         
         # Dosage unit conversions
@@ -157,8 +117,8 @@ class MedicalValidator:
             "qd": 1
         }
         
-        # Drug interaction database
-        self.interaction_matrix = self._build_interaction_matrix()
+        # Drug interaction matrix - now handled by LLM analysis
+        self.interaction_matrix = {}
         
         # Pregnancy categories
         self.pregnancy_categories = {
@@ -169,20 +129,308 @@ class MedicalValidator:
             "X": "Contraindicated in pregnancy"
         }
     
-    def _build_interaction_matrix(self) -> Dict[str, Dict[str, Dict]]:
-        """Build comprehensive drug interaction matrix"""
-        interactions = {}
+    
+    def _llm_batch_validate_medications(self, medications: List[Dict], patient_info: Optional[Dict] = None) -> Dict[str, List[MedicalAlert]]:
+        """
+        Batch validate multiple medications in a single LLM call for speed
+        """
+        if not medications:
+            return {}
+            
+        try:
+            from . import gemini
+            if not hasattr(gemini, 'analyze_with_gemini') or not gemini.available():
+                return {}
+            
+            # Prepare medication list for batch analysis
+            med_list = []
+            for i, med in enumerate(medications):
+                matched_name = med.get("matched_name", med.get("name_candidate", ""))
+                original_name = med.get("name_candidate", "")
+                dosage = med.get("complete_dosage", med.get("dosage", ""))
+                frequency = med.get("frequency", "")
+                duration = med.get("duration", "")
+                
+                med_list.append(f"{i+1}. {matched_name} (original: {original_name})")
+                med_list.append(f"   Dosage: {dosage}")
+                med_list.append(f"   Frequency: {frequency}")
+                med_list.append(f"   Duration: {duration}")
+            
+            medications_text = "\n".join(med_list)
+            
+            # Get other drug names for interaction checking
+            drug_names = [med.get("matched_name", med.get("name_candidate", "")) for med in medications]
+            
+            patient_context = ""
+            if patient_info:
+                age = patient_info.get("age", "")
+                conditions = patient_info.get("conditions", [])
+                if age: patient_context += f"Age: {age}. "
+                if conditions: patient_context += f"Conditions: {', '.join(conditions)}. "
+            
+            # Create comprehensive batch validation prompt
+            batch_prompt = f"""
+You are a clinical pharmacist reviewing a prescription with multiple medications. Analyze ALL medications together for safety concerns.
+
+MEDICATIONS TO ANALYZE:
+{medications_text}
+
+PATIENT CONTEXT:
+{patient_context if patient_context else "No patient information provided"}
+
+ANALYZE FOR:
+1. Individual medication safety (dosage appropriateness, frequency clarity)
+2. Drug-drug interactions between the medications listed
+3. Contraindications based on patient conditions
+4. Any red flags requiring immediate attention
+
+RULES:
+- Only flag genuine safety concerns, not routine checks
+- CRITICAL: Reserved for immediate dangers (overdose, severe interactions, absolute contraindications)
+- WARNING: For dosage concerns, moderate interactions, relative contraindications  
+- INFO: For routine allergy checks, monitoring requirements, general precautions
+- DO NOT flag routine allergy history verification as CRITICAL unless patient has known allergies
+- Focus on major/moderate interactions and safety issues
+- Be concise and specific
+
+RESPOND IN THIS FORMAT:
+MEDICATION 1: [drug_name]
+SAFE: [yes/no]
+CONCERNS: [list concerns or "none"]
+RECOMMENDATIONS: [recommendations or "none"]
+
+MEDICATION 2: [drug_name]
+SAFE: [yes/no]
+CONCERNS: [list concerns or "none"]  
+RECOMMENDATIONS: [recommendations or "none"]
+
+OVERALL INTERACTIONS:
+[Any significant drug interactions between the medications, or "none detected"]
+"""
+            
+            result = gemini.analyze_with_gemini(batch_prompt)
+            
+            if result:
+                return self._parse_batch_validation_response(result, medications)
+                
+        except Exception as e:
+            print(f"Batch validation failed: {e}")
         
-        # Extract interactions from drug database
-        for drug_name, drug_info in self.drug_database.items():
-            interactions[drug_name] = {}
-            for interaction in drug_info.get("drug_interactions", []):
-                interactions[drug_name][interaction["drug"]] = {
-                    "severity": interaction["severity"],
-                    "effect": interaction["effect"]
-                }
+        return {}
+    
+    def _parse_batch_validation_response(self, response: str, medications: List[Dict]) -> Dict[str, List[MedicalAlert]]:
+        """Parse batch validation response into alerts per medication"""
+        alerts_dict = {}
         
-        return interactions
+        try:
+            sections = response.split("MEDICATION ")
+            
+            for i, section in enumerate(sections[1:], 1):  # Skip first empty section
+                if i <= len(medications):
+                    med = medications[i-1]
+                    drug_name = med.get("matched_name", med.get("name_candidate", ""))
+                    
+                    alerts = []
+                    lines = section.split('\n')
+                    
+                    safe = "yes"
+                    concerns = []
+                    recommendations = []
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("SAFE:"):
+                            safe = line.split(":", 1)[1].strip().lower()
+                        elif line.startswith("CONCERNS:"):
+                            concerns_text = line.split(":", 1)[1].strip()
+                            if concerns_text.lower() not in ["none", ""]:
+                                # Split on semicolons or periods, not commas (to preserve phrases with commas)
+                                concerns = [c.strip() for c in concerns_text.replace(";", ".").split(".") if c.strip()]
+                                if not concerns:  # fallback to single concern
+                                    concerns = [concerns_text]
+                        elif line.startswith("RECOMMENDATIONS:"):
+                            rec_text = line.split(":", 1)[1].strip()
+                            if rec_text.lower() not in ["none", ""]:
+                                # Keep full recommendation text, don't split on commas
+                                recommendations = [rec_text]
+                    
+                    # Convert to alerts
+                    if safe == "no" or concerns:
+                        for j, concern in enumerate(concerns):
+                            if concern:
+                                rec = recommendations[j] if j < len(recommendations) else "Consult healthcare provider"
+                                
+                                # Smarter alert level detection
+                                concern_lower = concern.lower()
+                                if any(word in concern_lower for word in ["overdose", "toxic", "deadly", "severe interaction", "absolute contraindication"]):
+                                    level = AlertLevel.CRITICAL
+                                elif any(word in concern_lower for word in ["allergy", "history", "verify", "check", "monitor", "caution"]):
+                                    level = AlertLevel.INFO
+                                elif any(word in concern_lower for word in ["high", "low", "moderate", "interaction", "contraindicated"]):
+                                    level = AlertLevel.WARNING
+                                else:
+                                    level = AlertLevel.WARNING
+                                
+                                alerts.append(MedicalAlert(
+                                    level=level,
+                                    category="batch_validation",
+                                    message=f"{drug_name}: {concern}",
+                                    recommendation=rec,
+                                    source="llm_batch_pharmacist",
+                                    confidence=0.85
+                                ))
+                    
+                    alerts_dict[drug_name] = alerts
+                    
+        except Exception as e:
+            print(f"Failed to parse batch validation response: {e}")
+        
+        return alerts_dict
+
+    def _llm_validate_medication(self, drug_name: str, original_name: str, dosage: str, 
+                                frequency: str, duration: str, patient_info: Optional[Dict] = None,
+                                all_medications: Optional[List] = None) -> List[MedicalAlert]:
+        """LLM-powered comprehensive medication validation"""
+        alerts = []
+        
+        try:
+            from . import gemini
+            if not hasattr(gemini, 'analyze_with_gemini') or not gemini.available():
+                return alerts
+            
+            # Prepare context for LLM
+            other_drugs = []
+            if all_medications:
+                other_drugs = [med.get("matched_name", med.get("name_candidate", "")) 
+                              for med in all_medications 
+                              if med.get("matched_name") != drug_name]
+            
+            patient_context = ""
+            if patient_info:
+                age = patient_info.get("age", "")
+                weight = patient_info.get("weight", "")
+                if age: patient_context += f"Age: {age}. "
+                if weight: patient_context += f"Weight: {weight}. "
+            
+            # Create comprehensive validation prompt
+            validation_prompt = f"""
+You are a clinical pharmacist reviewing a prescription. Analyze this medication for safety concerns.
+
+MEDICATION DETAILS:
+- Drug: {drug_name}
+- Original prescription text: {original_name}
+- Dosage: {dosage}
+- Frequency: {frequency}
+- Duration: {duration}
+
+PATIENT CONTEXT:
+{patient_context if patient_context else "No patient information provided"}
+
+OTHER MEDICATIONS:
+{', '.join(other_drugs) if other_drugs else "None listed"}
+
+ANALYZE FOR:
+1. Dosage appropriateness (too high/low for typical use)
+2. Frequency format issues (unclear timing)
+3. Drug interactions with other medications listed
+4. Common contraindications or warnings
+5. Any red flags requiring immediate attention
+
+RULES:
+- Only flag genuine safety concerns, not routine checks
+- CRITICAL: Reserved for immediate dangers (overdose, severe interactions, absolute contraindications)
+- WARNING: For dosage concerns, moderate interactions, relative contraindications  
+- INFO: For routine allergy checks, monitoring requirements, general precautions
+- DO NOT flag routine allergy history verification as CRITICAL unless patient has known allergies
+- For dosage: Only warn if clearly outside normal ranges
+- For frequency: Only warn if format is unclear or dangerous
+- For interactions: Only major/moderate interactions
+- Be concise and specific
+
+RESPOND IN THIS FORMAT:
+SAFE: [yes/no]
+CONCERNS: [list major concerns only, or "none"]
+RECOMMENDATIONS: [specific actionable recommendations, or "none"]
+
+Example response:
+SAFE: yes
+CONCERNS: none  
+RECOMMENDATIONS: none
+
+OR
+
+SAFE: no
+CONCERNS: dosage appears high for pediatric use, unclear frequency format
+RECOMMENDATIONS: verify pediatric dosing guidelines, clarify frequency as "every 8 hours" instead of "TDS"
+"""
+            
+            response = gemini.analyze_with_gemini(validation_prompt)
+            
+            if response:
+                alerts.extend(self._parse_llm_validation_response(response, drug_name))
+                
+        except Exception as e:
+            print(f"LLM validation failed for {drug_name}: {e}")
+        
+        return alerts
+    
+    def _parse_llm_validation_response(self, response: str, drug_name: str) -> List[MedicalAlert]:
+        """Parse LLM validation response into alerts"""
+        alerts = []
+        
+        try:
+            lines = response.strip().split('\n')
+            safe = "yes"
+            concerns = []
+            recommendations = []
+            
+            for line in lines:
+                line = line.strip()
+                if line.startswith("SAFE:"):
+                    safe = line.split(":", 1)[1].strip().lower()
+                elif line.startswith("CONCERNS:"):
+                    concerns_text = line.split(":", 1)[1].strip()
+                    if concerns_text.lower() not in ["none", ""]:
+                        # Split on semicolons or periods, not commas (to preserve phrases with commas)
+                        concerns = [c.strip() for c in concerns_text.replace(";", ".").split(".") if c.strip()]
+                        if not concerns:  # fallback to single concern
+                            concerns = [concerns_text]
+                elif line.startswith("RECOMMENDATIONS:"):
+                    rec_text = line.split(":", 1)[1].strip()
+                    if rec_text.lower() not in ["none", ""]:
+                        # Keep full recommendation text, don't split on commas
+                        recommendations = [rec_text]
+            
+            # Convert to alerts
+            if safe == "no" or concerns:
+                for i, concern in enumerate(concerns):
+                    if concern:
+                        rec = recommendations[i] if i < len(recommendations) else "Consult healthcare provider"
+                        
+                        # Determine alert level with smarter categorization
+                        concern_lower = concern.lower()
+                        if any(word in concern_lower for word in ["overdose", "toxic", "deadly", "severe interaction", "absolute contraindication"]):
+                            level = AlertLevel.CRITICAL
+                        elif any(word in concern_lower for word in ["allergy", "history", "verify", "check", "monitor", "caution"]):
+                            level = AlertLevel.INFO
+                        elif any(word in concern_lower for word in ["high", "low", "moderate", "interaction", "contraindicated"]):
+                            level = AlertLevel.WARNING
+                        else:
+                            level = AlertLevel.WARNING
+                        
+                        alerts.append(MedicalAlert(
+                            level=level,
+                            category="llm_validation",
+                            message=f"{drug_name}: {concern}",
+                            recommendation=rec,
+                            source="llm_pharmacist",
+                            confidence=0.85
+                        ))
+                        
+        except Exception as e:
+            print(f"Failed to parse LLM validation response: {e}")
+        
+        return alerts
     
     def validate_medication(
         self, 
@@ -194,59 +442,60 @@ class MedicalValidator:
         """Comprehensive medication validation"""
         
         alerts = []
-        drug_name = medication.get("name_candidate", "").lower()
-        dosage = medication.get("dosage", "")
+        original_name = medication.get("name_candidate", "")
+        matched_name = medication.get("matched_name", "")
+        dosage = medication.get("dosage", "") or medication.get("complete_dosage", "")
         frequency = medication.get("frequency", "")
+        duration = medication.get("duration", "")
         
-        # Get drug information
-        drug_info = self.drug_database.get(drug_name, {})
+        # Use LLM-powered validation for comprehensive safety analysis
+        if matched_name and self.enhanced_db_available:
+            # For individual validation, check if we can batch with others
+            # This is used for single medication validation
+            llm_alerts = self._llm_validate_medication(
+                drug_name=matched_name,
+                original_name=original_name,
+                dosage=dosage,
+                frequency=frequency,
+                duration=duration,
+                patient_info=patient_info,
+                all_medications=all_medications
+            )
+            alerts.extend(llm_alerts)
+            
+            # Check for critical drug monitoring
+            critical_info = self.critical_drugs.get(matched_name.lower())
+            if critical_info:
+                alerts.append(MedicalAlert(
+                    level=AlertLevel.WARNING,
+                    category="monitoring",
+                    message=f"High-risk medication: {matched_name} requires monitoring",
+                    recommendation=f"Monitor: {', '.join(critical_info['monitoring'])}",
+                    source="critical_drug_list",
+                    confidence=0.9
+                ))
         
-        # Validate drug exists
-        if not drug_info:
+        elif not matched_name:
+            # No match found - drug not recognized
             alerts.append(MedicalAlert(
                 level=AlertLevel.WARNING,
                 category="drug_recognition",
-                message=f"Drug '{drug_name}' not found in database",
+                message=f"Drug '{original_name}' not recognized",
                 recommendation="Verify drug name spelling and check against standard formularies",
-                source="drug_database",
+                source="enhanced_database",
                 confidence=0.8
             ))
         
-        # Validate dosage
-        dosage_validation = self.validate_dosage(dosage, drug_info)
-        alerts.extend(dosage_validation.alerts)
-        
-        # Validate frequency
-        frequency_validation = self.validate_frequency(frequency, drug_info)
-        alerts.extend(frequency_validation)
-        
-        # Check drug interactions
-        if all_medications and drug_info:
-            interaction_alerts = self.check_drug_interactions(drug_name, all_medications)
-            alerts.extend(interaction_alerts)
-        
-        # Patient-specific validations
-        if patient_info and drug_info:
-            patient_alerts = self.validate_for_patient(drug_info, patient_info)
-            alerts.extend(patient_alerts)
-        
-        # Check for black box warnings
-        if drug_info.get("black_box_warnings"):
-            for warning in drug_info["black_box_warnings"]:
-                alerts.append(MedicalAlert(
-                    level=AlertLevel.CRITICAL,
-                    category="black_box_warning",
-                    message=f"Black Box Warning: {warning}",
-                    recommendation="Review prescribing information and ensure appropriate monitoring",
-                    source="fda_warnings",
-                    confidence=1.0
-                ))
-        
         # Calculate overall safety score
-        safety_score = self.calculate_safety_score(alerts)
+        critical_alerts = sum(1 for alert in alerts if alert.level == AlertLevel.CRITICAL)
+        warning_alerts = sum(1 for alert in alerts if alert.level == AlertLevel.WARNING)
+        info_alerts = sum(1 for alert in alerts if alert.level == AlertLevel.INFO)
+        
+        safety_score = max(0, 100 - (critical_alerts * 40) - (warning_alerts * 15) - (info_alerts * 5))
         
         return {
-            "medication_name": drug_name,
+            "medication_name": matched_name or original_name,
+            "original_name": original_name,
             "validation_status": "validated" if not any(a.level == AlertLevel.CRITICAL for a in alerts) else "critical_issues",
             "safety_score": safety_score,
             "alerts": [
@@ -260,18 +509,11 @@ class MedicalValidator:
                 }
                 for alert in alerts
             ],
-            "drug_info": drug_info,
-            "dosage_validation": {
-                "is_valid": dosage_validation.is_valid,
-                "parsed_value": dosage_validation.parsed_value,
-                "parsed_unit": dosage_validation.parsed_unit,
-                "standard_range": dosage_validation.standard_range
-            },
-            "monitoring_required": drug_info.get("monitoring_required", []),
-            "pregnancy_category": drug_info.get("pregnancy_category", "Unknown")
+            "enhanced_db_used": self.enhanced_db_available and bool(matched_name),
+            "validation_method": "llm_powered" if matched_name and self.enhanced_db_available else "basic"
         }
     
-    def validate_dosage(self, dosage_text: str, drug_info: Dict) -> DosageValidation:
+    def validate_dosage_basic(self, dosage_text: str, drug_info: Dict) -> DosageValidation:
         """Validate dosage against standard ranges"""
         alerts = []
         
@@ -584,3 +826,125 @@ class MedicalValidator:
             recommendations.append("Address contraindications - consider alternative therapy")
         
         return recommendations
+    
+    def generate_safety_report_from_validations(self, validation_results: List[Dict[str, Any]], medications: List[Dict]) -> Dict[str, Any]:
+        """Generate safety report from existing validation results to avoid double processing"""
+        
+        # Collect all alerts from validation results
+        all_alerts = []
+        for validation in validation_results:
+            all_alerts.extend(validation.get("alerts", []))
+        
+        # Count alerts by level
+        critical_alerts = [a for a in all_alerts if a["level"] == "critical"]
+        warning_alerts = [a for a in all_alerts if a["level"] == "warning"]
+        info_alerts = [a for a in all_alerts if a["level"] == "info"]
+        
+        # Calculate overall safety score using the same logic
+        overall_safety_score = self.calculate_safety_score([
+            MedicalAlert(
+                level=AlertLevel.CRITICAL if a["level"] == "critical" else 
+                      AlertLevel.WARNING if a["level"] == "warning" else AlertLevel.INFO,
+                category=a["category"],
+                message=a["message"],
+                recommendation=a["recommendation"],
+                source=a["source"],
+                confidence=a["confidence"]
+            )
+            for a in all_alerts
+        ])
+        
+        return {
+            "overall_safety_score": overall_safety_score,
+            "total_medications": len(medications),
+            "medications_with_issues": len([v for v in validation_results if v["alerts"]]),
+            "critical_alerts_count": len(critical_alerts),
+            "warning_alerts_count": len(warning_alerts),
+            "info_alerts_count": len(info_alerts),
+            "medication_validations": validation_results,
+            "summary_recommendations": self._generate_summary_recommendations(all_alerts),
+            "monitoring_requirements": list(set(
+                req for validation in validation_results 
+                for req in validation.get("monitoring_required", [])
+            )),
+            "validation_timestamp": time.time()
+        }
+    
+    def batch_validate_medications(self, medications: List[Dict], patient_info: Optional[Dict] = None, 
+                                  validation_level: ValidationLevel = ValidationLevel.STANDARD) -> List[Dict[str, Any]]:
+        """
+        Batch validate multiple medications for much faster processing
+        """
+        if not medications:
+            return []
+        
+        results = []
+        
+        # Use batch LLM validation if enhanced DB is available
+        if self.enhanced_db_available and len(medications) > 1:
+            try:
+                # Get batch validation results
+                batch_alerts = self._llm_batch_validate_medications(medications, patient_info)
+                print(f"✅ Batch validated {len(medications)} medications in single LLM call")
+                
+                # Process each medication with its batch alerts
+                for medication in medications:
+                    original_name = medication.get("name_candidate", "")
+                    matched_name = medication.get("matched_name", "")
+                    drug_name = matched_name or original_name
+                    
+                    # Get alerts from batch processing
+                    alerts = batch_alerts.get(matched_name, [])
+                    
+                    # Add critical drug monitoring alerts
+                    if matched_name:
+                        critical_info = self.critical_drugs.get(matched_name.lower())
+                        if critical_info:
+                            alerts.append(MedicalAlert(
+                                level=AlertLevel.WARNING,
+                                category="monitoring",
+                                message=f"High-risk medication: {matched_name} requires monitoring",
+                                recommendation=f"Monitor: {', '.join(critical_info['monitoring'])}",
+                                source="critical_drug_list",
+                                confidence=0.9
+                            ))
+                    
+                    # Calculate safety score
+                    critical_alerts = sum(1 for alert in alerts if alert.level == AlertLevel.CRITICAL)
+                    warning_alerts = sum(1 for alert in alerts if alert.level == AlertLevel.WARNING)
+                    info_alerts = sum(1 for alert in alerts if alert.level == AlertLevel.INFO)
+                    
+                    safety_score = max(0, 100 - (critical_alerts * 40) - (warning_alerts * 15) - (info_alerts * 5))
+                    
+                    result = {
+                        "medication_name": matched_name or original_name,
+                        "original_name": original_name,
+                        "validation_status": "validated" if not any(a.level == AlertLevel.CRITICAL for a in alerts) else "critical_issues",
+                        "safety_score": safety_score,
+                        "alerts": [
+                            {
+                                "level": alert.level.value,
+                                "category": alert.category,
+                                "message": alert.message,
+                                "recommendation": alert.recommendation,
+                                "source": alert.source,
+                                "confidence": alert.confidence
+                            }
+                            for alert in alerts
+                        ],
+                        "enhanced_db_used": self.enhanced_db_available and bool(matched_name),
+                        "validation_method": "llm_batch_powered"
+                    }
+                    results.append(result)
+                
+                return results
+                
+            except Exception as e:
+                print(f"Batch validation failed, falling back to individual: {e}")
+        
+        # Fallback to individual validation
+        for medication in medications:
+            result = self.validate_medication(medication, medications, patient_info, validation_level)
+            results.append(result)
+        
+        return results

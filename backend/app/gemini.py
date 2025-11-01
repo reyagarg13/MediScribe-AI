@@ -109,10 +109,11 @@ First, look for and extract prescription header information:
 Then extract all prescribed items with complete dosage information:
 
 **FOR EACH PRESCRIBED ITEM:**
-- **Item Name**: The exact medication/therapy name as written
-- **Complete Dosage**: Full dosage description exactly as written (e.g., "1 cap 3x a day", "500mg twice daily", "2 tablets every 8 hours")
+- **Item Name**: The exact medication/therapy name as written (including TAB, SYP, CAP prefixes)
+- **Complete Dosage**: Full dosage description exactly as written, including ALL instructions (e.g., "1 tab 3x a day after meals", "500mg twice daily before food", "2 caps morning and evening with meals")
 - **Frequency**: How often (e.g., "3x a day", "twice daily", "every 8 hours", "as needed")
 - **Duration**: How long (e.g., "7 days", "2 weeks", "until symptoms improve")
+- **Meal Instructions**: Timing relative to meals (e.g., "before meals", "after meals", "with food", "empty stomach")
 
 ## OUTPUT FORMAT:
 Structure your response exactly like this:
@@ -130,15 +131,17 @@ Structure your response exactly like this:
 **Prescription Number:** [Number or "Not visible"]
 
 === PRESCRIBED MEDICATIONS ===
-1. **Item Name:** [Exact name as written]
-   **Complete Dosage:** [Full dosage exactly as written - preserve original wording]
+1. **Item Name:** [Exact name as written, including TAB/SYP/CAP prefixes]
+   **Complete Dosage:** [Full dosage exactly as written - preserve ALL instructions including meal timing]
    **Frequency:** [How often]
    **Duration:** [How long]
+   **Meal Instructions:** [Before/after meals, with food, etc. or "Not specified"]
 
 2. **Item Name:** [Next item...]
    **Complete Dosage:** [...]
    **Frequency:** [...]
    **Duration:** [...]
+   **Meal Instructions:** [...]
 
 ## CRITICAL INSTRUCTIONS:
 - **PRESERVE EXACT WORDING**: For dosages, copy the complete text exactly as written (e.g., "1 cap 3x a day" not "3x daily")

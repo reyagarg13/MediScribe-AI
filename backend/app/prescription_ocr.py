@@ -31,68 +31,22 @@ except Exception:
     fuzz = None
     RAPIDFUZZ_AVAILABLE = False
 
-# Enhanced medication vocabulary with common drug names, brand names, and generic names
-DRUG_LIST = [
-    # Pain relievers
-    "acetaminophen", "paracetamol", "tylenol", "ibuprofen", "advil", "motrin", 
-    "naproxen", "aleve", "aspirin", "tramadol", "codeine", "morphine", "oxycodone", 
-    "hydrocodone", "vicodin", "percocet", "fentanyl",
-    
-    # Antibiotics
-    "amoxicillin", "amoxil", "azithromycin", "zithromax", "ciprofloxacin", "cipro",
-    "ceftriaxone", "rocephin", "doxycycline", "vibramycin", "clindamycin", "cleocin",
-    "metronidazole", "flagyl", "penicillin", "erythromycin", "clarithromycin", "biaxin",
-    "cephalexin", "keflex", "trimethoprim", "sulfamethoxazole", "bactrim",
-    
-    # Heart medications
-    "atorvastatin", "lipitor", "simvastatin", "zocor", "lisinopril", "prinivil",
-    "amlodipine", "norvasc", "metoprolol", "lopressor", "carvedilol", "coreg",
-    "losartan", "cozaar", "valsartan", "diovan", "enalapril", "vasotec",
-    "propranolol", "inderal", "diltiazem", "cardizem", "verapamil", "calan",
-    
-    # Diabetes medications
-    "metformin", "glucophage", "insulin", "glipizide", "glucotrol", "glyburide",
-    "diabeta", "sitagliptin", "januvia", "pioglitazone", "actos", "glimepiride",
-    "amaryl", "empagliflozin", "jardiance", "liraglutide", "victoza",
-    
-    # Stomach/GI medications
-    "omeprazole", "prilosec", "pantoprazole", "protonix", "lansoprazole", "prevacid",
-    "esomeprazole", "nexium", "ranitidine", "zantac", "famotidine", "pepcid",
-    "simethicone", "gas-x", "loperamide", "imodium", "ondansetron", "zofran",
-    
-    # Mental health medications
-    "sertraline", "zoloft", "fluoxetine", "prozac", "escitalopram", "lexapro",
-    "paroxetine", "paxil", "venlafaxine", "effexor", "bupropion", "wellbutrin",
-    "trazodone", "desyrel", "alprazolam", "xanax", "lorazepam", "ativan",
-    "clonazepam", "klonopin", "diazepam", "valium", "zolpidem", "ambien",
-    
-    # Allergy/Respiratory
-    "prednisone", "deltasone", "prednisolone", "methylprednisolone", "medrol",
-    "albuterol", "ventolin", "montelukast", "singulair", "fluticasone", "flonase",
-    "cetirizine", "zyrtec", "loratadine", "claritin", "fexofenadine", "allegra",
-    "diphenhydramine", "benadryl", "guaifenesin", "mucinex",
-    
-    # Blood thinners
-    "warfarin", "coumadin", "rivaroxaban", "xarelto", "apixaban", "eliquis",
-    "dabigatran", "pradaxa", "clopidogrel", "plavix", "enoxaparin", "lovenox",
-    
-    # Thyroid medications
-    "levothyroxine", "synthroid", "liothyronine", "cytomel", "methimazole", "tapazole",
-    
-    # Common vitamins and supplements
-    "vitamin", "calcium", "iron", "folic", "folate", "biotin", "thiamine", "riboflavin",
-    "niacin", "pyridoxine", "cobalamin", "ascorbic", "cholecalciferol", "ergocalciferol",
-    "magnesium", "potassium", "zinc", "selenium", "chromium", "multivitamin",
-    
-    # Eye/Ear medications
-    "timolol", "latanoprost", "xalatan", "brimonidine", "alphagan", "dorzolamide",
-    "trusopt", "ciprofloxacin", "cortisporin", "neomycin", "polymyxin",
-    
-    # Skin medications
-    "hydrocortisone", "triamcinolone", "mupirocin", "bactroban", "clotrimazole",
-    "lotrimin", "ketoconazole", "nizoral", "tretinoin", "retin-a", "adapalene",
-    "differin", "benzoyl", "peroxide", "salicylic", "calamine"
+# Legacy drug list - kept as fallback only (now using enhanced database)
+# This hardcoded list is only used when the enhanced API-based database fails
+LEGACY_DRUG_LIST = [
+    # Most common drugs only - reduced from full list
+    "acetaminophen", "tylenol", "ibuprofen", "advil", "aspirin", "amoxicillin", 
+    "lipitor", "metformin", "lisinopril", "omeprazole", "prednisone", "albuterol",
+    "warfarin", "insulin", "simvastatin", "amlodipine", "sertraline", "zoloft",
+    "atorvastatin", "levothyroxine", "synthroid", "losartan", "metoprolol",
+    "fluoxetine", "prozac", "hydrocodone", "vicodin", "oxycodone", "tramadol"
 ]
+
+# Note: International drug name mapping is now handled by LLM-powered normalization
+# in drug_database.py - no more hardcoded mappings needed!
+
+# For backward compatibility - some old code might reference DRUG_LIST
+DRUG_LIST = LEGACY_DRUG_LIST
 
 
 def _pil_to_cv2(image: Image.Image) -> Any:
@@ -182,7 +136,7 @@ def _extract_frequency(line: str) -> Optional[str]:
     return None
 
 
-def fuzzy_match_drug(name: str) -> Dict[str, Any]:
+def fuzzy_match_drug_legacy(name: str) -> Dict[str, Any]:
     """Enhanced fuzzy matching with better error handling and logging."""
     if not name or len(name.strip()) < 2:
         return {"match": None, "score": 0, "candidates": []}
@@ -194,7 +148,7 @@ def fuzzy_match_drug(name: str) -> Dict[str, Any]:
         best_score = 0
         candidates = []
         
-        for drug in DRUG_LIST:
+        for drug in LEGACY_DRUG_LIST:
             drug_lower = drug.lower()
             # Exact match
             if name_clean == drug_lower:
@@ -222,7 +176,7 @@ def fuzzy_match_drug(name: str) -> Dict[str, Any]:
     
     try:
         # Get top 3 matches
-        matches = process.extract(name_clean, DRUG_LIST, scorer=fuzz.token_sort_ratio, limit=3)
+        matches = process.extract(name_clean, LEGACY_DRUG_LIST, scorer=fuzz.token_sort_ratio, limit=3)
         if matches:
             best_match = matches[0]
             return {
@@ -234,6 +188,37 @@ def fuzzy_match_drug(name: str) -> Dict[str, Any]:
         print(f"Fuzzy matching error: {e}")
     
     return {"match": None, "score": 0, "candidates": []}
+
+
+# Import enhanced drug database functions
+try:
+    from .drug_database import fuzzy_match_drug_enhanced, search_drug_enhanced
+    ENHANCED_DB_AVAILABLE = True
+    print("✅ Enhanced drug database loaded successfully")
+except ImportError as e:
+    ENHANCED_DB_AVAILABLE = False
+    print(f"❌ Enhanced drug database not available: {e}")
+
+
+def fuzzy_match_drug(name: str) -> Dict[str, Any]:
+    """
+    Enhanced drug matching using RxNorm/OpenFDA APIs with fallback to legacy
+    """
+    if ENHANCED_DB_AVAILABLE:
+        try:
+            # Try enhanced database first
+            result = fuzzy_match_drug_enhanced(name)
+            if result and result.get("score", 0) > 50:
+                print(f"✅ Enhanced DB match for '{name}': {result['match']} ({result['score']}%)")
+                return result
+        except Exception as e:
+            print(f"⚠️ Enhanced drug lookup failed for '{name}': {e}")
+    
+    # Fallback to legacy hardcoded list
+    legacy_result = fuzzy_match_drug_legacy(name)
+    if legacy_result.get("score", 0) > 0:
+        print(f"📋 Legacy DB match for '{name}': {legacy_result['match']} ({legacy_result['score']}%)")
+    return legacy_result
 
 
 def parse_prescription_text(text: str) -> List[Dict[str, Any]]:
@@ -405,7 +390,8 @@ def parse_gemini_response(analysis_text: str) -> Dict[str, Any]:
                         "name_candidate": item_name,
                         "complete_dosage": None,
                         "frequency": None,
-                        "duration": None
+                        "duration": None,
+                        "meal_instructions": None
                     }
             
             # Look for medication details
@@ -430,12 +416,53 @@ def parse_gemini_response(analysis_text: str) -> Dict[str, Any]:
                         duration_text = dur_match.group(1).strip()
                         if duration_text.lower() not in ["not specified", "none", ""]:
                             medication_data["duration"] = duration_text
+                            
+                elif '**Meal Instructions:**' in line:
+                    meal_match = re.search(r'\*\*Meal Instructions:\*\*\s*(.+)', line)
+                    if meal_match:
+                        meal_text = meal_match.group(1).strip()
+                        if meal_text.lower() not in ["not specified", "none", ""]:
+                            medication_data["meal_instructions"] = meal_text
     
-    # Process the last medication if exists
+    # Collect all medications first (without individual processing)
     if medication_data:
-        processed_med = _process_medication_data(medication_data)
-        if processed_med:
-            result["medications"].append(processed_med)
+        result["medications"].append(medication_data)
+    
+    # OPTIMIZATION: Skip individual processing, go straight to batch processing
+    if result["medications"]:
+        try:
+            from .drug_database import batch_fuzzy_match_drugs_enhanced
+            
+            # Extract all drug names for batch processing
+            drug_names = [med["name_candidate"] for med in result["medications"]]
+            print(f"🚀 Starting batch processing for {len(drug_names)} drugs...")
+            
+            # Single batch call for all drugs
+            batch_results = batch_fuzzy_match_drugs_enhanced(drug_names)
+            
+            # Process medications with batch results
+            optimized_medications = []
+            for med_data in result["medications"]:
+                drug_name = med_data["name_candidate"]
+                batch_fuzzy_result = batch_results.get(drug_name, {})
+                
+                # Process with batch result (no individual LLM calls)
+                processed_med = _process_medication_data(med_data, batch_fuzzy_result)
+                if processed_med:
+                    optimized_medications.append(processed_med)
+            
+            result["medications"] = optimized_medications
+            print(f"✅ Batch processed {len(drug_names)} drugs in single LLM call")
+            
+        except ImportError:
+            print("⚠️ Batch processing not available, falling back to individual processing")
+            # Only fall back to individual processing if batch completely fails
+            optimized_medications = []
+            for med_data in result["medications"]:
+                processed_med = _process_medication_data(med_data)
+                if processed_med:
+                    optimized_medications.append(processed_med)
+            result["medications"] = optimized_medications
     
     # Fallback to legacy parsing if no structured data found
     if not result["medications"]:
@@ -445,12 +472,13 @@ def parse_gemini_response(analysis_text: str) -> Dict[str, Any]:
     return result
 
 
-def _process_medication_data(medication_data: Dict) -> Dict[str, Any]:
+def _process_medication_data(medication_data: Dict, fuzzy_result: Dict[str, Any] = None) -> Dict[str, Any]:
     """Process medication data and add fuzzy matching."""
     item_name = medication_data["name_candidate"]
     
-    # Fuzzy match against our drug database
-    fuzzy_result = fuzzy_match_drug(item_name)
+    # Use provided fuzzy result from batch processing, or do individual lookup
+    if fuzzy_result is None:
+        fuzzy_result = fuzzy_match_drug(item_name)
     
     # Extract simple dosage and frequency for backward compatibility
     complete_dosage = medication_data.get("complete_dosage", "")
@@ -467,10 +495,12 @@ def _process_medication_data(medication_data: Dict) -> Dict[str, Any]:
         "complete_dosage": complete_dosage,  # New detailed dosage
         "frequency": simple_frequency,
         "duration": medication_data.get("duration"),
+        "meal_instructions": medication_data.get("meal_instructions"),  # Add meal timing
         "confidence": "high" if fuzzy_result.get("score", 0) >= 80 else "medium" if fuzzy_result.get("score", 0) >= 60 else "low",
         "method": "gemini_vision_enhanced",
         "notes": None,
-        "warnings": []
+        "warnings": [],
+        "normalization": fuzzy_result.get("normalization")  # Add LLM normalization info
     }
     
     return medication

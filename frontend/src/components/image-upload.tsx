@@ -311,9 +311,20 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Pill className="w-4 h-4 text-blue-400" />
-                  <span className="font-medium text-white">
-                    {med.matched_name || med.name_candidate || med.raw_line || "Unknown item"}
-                  </span>
+                  <div className="flex flex-col">
+                    {/* Show mapping if AI normalization occurred */}
+                    {med.normalization ? (
+                      <div className="font-medium text-white">
+                        <span className="text-zinc-300 font-mono text-sm">{med.name_candidate}</span>
+                        <span className="text-blue-400 mx-2">→</span>
+                        <span className="text-green-400">{med.matched_name}</span>
+                      </div>
+                    ) : (
+                      <span className="font-medium text-white">
+                        {med.matched_name || med.name_candidate || med.raw_line || "Unknown item"}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="flex items-center gap-2">
@@ -339,6 +350,16 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
                 </div>
               </div>
 
+              {/* AI Recognition Note (if LLM normalization was used) */}
+              {med.normalization && (
+                <div className="mb-3 p-2 bg-blue-900/20 border border-blue-700/50 rounded">
+                  <div className="text-xs text-blue-300 flex items-center gap-2">
+                    <span>🤖</span>
+                    <span>{med.normalization.reasoning}</span>
+                  </div>
+                </div>
+              )}
+
               {/* Medication Details */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm mb-3">
                 {/* Show complete dosage if available, otherwise fall back to simple dosage */}
@@ -360,6 +381,12 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
                   <div>
                     <span className="text-zinc-400">Duration:</span>
                     <span className="ml-1 text-zinc-200">{med.duration}</span>
+                  </div>
+                )}
+                {med.meal_instructions && (
+                  <div>
+                    <span className="text-zinc-400">Meal Timing:</span>
+                    <span className="ml-1 text-zinc-200 font-medium">{med.meal_instructions}</span>
                   </div>
                 )}
                 {med.route && (
@@ -418,23 +445,10 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
                 </div>
                 <div>
                   <span className="text-zinc-400">Overall Confidence:</span>
-                  <span className="ml-1 text-zinc-200">{(data.ocr_analysis.overall_confidence * 100).toFixed(1)}%</span>
+                  <span className="ml-1 text-zinc-200">{data.ocr_analysis.overall_confidence}%</span>
                 </div>
               </div>
               
-              {data.ocr_analysis.processing_stages && (
-                <div className="space-y-2">
-                  <h6 className="text-xs font-medium text-zinc-300">Processing Stages:</h6>
-                  {data.ocr_analysis.processing_stages.map((stage: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-xs">
-                      <span className="text-zinc-400">{stage.stage.replace('_', ' ')}</span>
-                      <span className={stage.success ? "text-green-400" : "text-red-400"}>
-                        {stage.success ? "✓" : "✗"} {(stage.confidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </details>
         )}
@@ -493,41 +507,50 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
         
         {/* Advanced Settings Panel */}
         {ocrMode === "advanced" && (
-          <div className="mt-4 p-4 bg-zinc-800 rounded-lg border border-zinc-700">
-            <h4 className="text-sm font-medium text-zinc-200 mb-3">Advanced Settings</h4>
+          <div className="mt-4 p-4 bg-gradient-to-r from-blue-900/20 to-purple-900/20 rounded-lg border border-blue-700/50">
+            <h4 className="text-sm font-medium text-blue-200 mb-3 flex items-center gap-2">
+              ⚙️ Advanced Settings
+              <span className="text-xs bg-blue-900/50 px-2 py-1 rounded text-blue-300">Configure validation</span>
+            </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs text-zinc-400">Validation Level</label>
+                <label className="text-xs text-zinc-400 font-medium">🔍 Validation Level</label>
                 <select 
                   value={advancedSettings.validationLevel}
                   onChange={(e) => setAdvancedSettings(prev => ({...prev, validationLevel: e.target.value}))}
-                  className="w-full mt-1 p-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm"
+                  className="w-full mt-1 p-3 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm hover:border-blue-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 >
-                  <option value="standard">Standard</option>
-                  <option value="comprehensive">Comprehensive</option>
+                  <option value="standard">📋 Standard - Basic safety checks</option>
+                  <option value="comprehensive">🔬 Comprehensive - Full medical analysis</option>
                 </select>
+                <p className="text-xs text-zinc-500 mt-1">
+                  {advancedSettings.validationLevel === "comprehensive" 
+                    ? "Includes detailed drug interactions, dosage validation, and contraindications" 
+                    : "Basic drug recognition and safety warnings"}
+                </p>
               </div>
               
               <div>
-                <label className="text-xs text-zinc-400">Patient Age</label>
+                <label className="text-xs text-zinc-400 font-medium">👤 Patient Age</label>
                 <input 
                   type="number"
-                  placeholder="Age (optional)"
+                  placeholder="Age (optional for dosage validation)"
                   value={advancedSettings.patientAge}
                   onChange={(e) => setAdvancedSettings(prev => ({...prev, patientAge: e.target.value}))}
-                  className="w-full mt-1 p-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm"
+                  className="w-full mt-1 p-3 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm hover:border-blue-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               
               <div className="md:col-span-2">
-                <label className="text-xs text-zinc-400">Patient Conditions (comma-separated)</label>
+                <label className="text-xs text-zinc-400 font-medium">🏥 Patient Conditions</label>
                 <input 
                   type="text"
-                  placeholder="e.g., diabetes, hypertension, kidney disease"
+                  placeholder="e.g., diabetes, hypertension, kidney disease (optional for interaction checks)"
                   value={advancedSettings.patientConditions}
                   onChange={(e) => setAdvancedSettings(prev => ({...prev, patientConditions: e.target.value}))}
-                  className="w-full mt-1 p-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm"
+                  className="w-full mt-1 p-3 bg-zinc-700 border border-zinc-600 rounded text-zinc-200 text-sm hover:border-blue-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
+                <p className="text-xs text-zinc-500 mt-1">Comma-separated list of medical conditions for contraindication checking</p>
               </div>
               
               <div className="flex items-center gap-4">
