@@ -8,7 +8,7 @@ venv/
 .env
 *.log
 .venv/
-
+mediscribe_repo/
 # Node
 node_modules/
 dist/
