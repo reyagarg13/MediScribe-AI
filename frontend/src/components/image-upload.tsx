@@ -1,13 +1,13 @@
 import { useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, FileImage, Pill, Eye, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { Upload, FileImage, Pill, Eye, CheckCircle, XCircle, AlertTriangle, Brain } from "lucide-react";
 
 export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [results, setResults] = useState<{[key: string]: any}>({});
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [analysisStage, setAnalysisStage] = useState<string>("");
@@ -15,7 +15,7 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
   // New: allow switching between endpoints (image analysis vs prescription OCR)
-  const [ocrMode, setOcrMode] = useState<"image"|"prescription"|"advanced">("prescription");
+  const [ocrMode, setOcrMode] = useState<"image"|"prescription"|"advanced"|"custom">("prescription");
   const [advancedSettings, setAdvancedSettings] = useState({
     validationLevel: "standard",
     includeSafetyReport: true,
@@ -27,9 +27,11 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
   const handleFileChange = async (file: File) => {
     if (!file) return;
     
+    // Reset any previous state
+    setResults(prev => ({...prev, [ocrMode]: null}));
+    setError(null);
     setImageUrl(URL.createObjectURL(file));
     setLoading(true);
-    setError(null);
     setAnalysisStartTime(Date.now());
     
     // Set analysis stages with realistic timing
@@ -75,6 +77,8 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
         formData.append("is_pregnant", String(advancedSettings.isPregnant));
         formData.append("validation_level", advancedSettings.validationLevel);
         formData.append("include_safety_report", String(advancedSettings.includeSafetyReport));
+      } else if (ocrMode === "custom") {
+        endpoint = "/prescription-custom-trocr";
       } else {
         endpoint = ocrMode === "prescription" ? "/prescription-ocr" : "/analyze-image";
       }
@@ -110,7 +114,7 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
       setAnalysisStage(`Analyzed in ${analysisTime}s`);
       
       setTimeout(() => {
-        setResult(data);
+        setResults(prev => ({...prev, [ocrMode]: data}));
         onResult(data);
       }, 1000);
       
@@ -122,6 +126,10 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
       setTimeout(() => {
         setLoading(false);
         setAnalysisStage("");
+        // Reset file input to allow same file upload again
+        if (fileInput.current) {
+          fileInput.current.value = "";
+        }
       }, 1500);
     }
   };
@@ -152,6 +160,182 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
       await handleFileChange(e.dataTransfer.files[0]);
     }
   }, []);
+
+  const renderImageProcessingShowcase = (data: any) => {
+    if (data.status === "error") {
+      return (
+        <div className="flex items-center gap-2 text-red-400 p-4 bg-red-900/20 border border-red-800 rounded-lg">
+          <AlertTriangle className="w-4 h-4" />
+          <span>Error: {data.error}</span>
+        </div>
+      );
+    }
+
+    const techniques = data.techniques || {};
+
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 p-4 rounded-lg border border-blue-700">
+          <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            🔬 Image Processing Techniques Showcase
+          </h3>
+          <div className="text-sm text-blue-300">
+            Demonstrating {Object.keys(techniques).length} implemented techniques on your uploaded image
+          </div>
+        </div>
+
+        {/* Original Image */}
+        {data.original_image && (
+          <div className="bg-zinc-900 p-4 rounded-lg border border-zinc-700">
+            <h4 className="text-md font-semibold text-white mb-3 flex items-center gap-2">
+              📷 Original Image
+            </h4>
+            <img 
+              src={`data:image/jpeg;base64,${data.original_image}`}
+              alt="Original"
+              className="max-w-full h-64 object-contain rounded border border-zinc-600 bg-zinc-800"
+            />
+            <div className="mt-2 text-xs text-zinc-400">
+              Original size: {data.original_size?.width} × {data.original_size?.height} pixels
+            </div>
+          </div>
+        )}
+
+        {/* Technique Results */}
+        {Object.entries(techniques).map(([key, technique]: [string, any]) => (
+          <div key={key} className="bg-zinc-900 p-4 rounded-lg border border-zinc-700">
+            <h4 className="text-md font-semibold text-white mb-2 flex items-center gap-2">
+              ⚡ {technique.title}
+            </h4>
+            
+            {technique.description && (
+              <p className="text-sm text-zinc-300 mb-3">{technique.description}</p>
+            )}
+            
+            {technique.success && technique.image ? (
+              <div className="space-y-3">
+                <img 
+                  src={`data:image/jpeg;base64,${technique.image}`}
+                  alt={technique.title}
+                  className="max-w-full h-64 object-contain rounded border border-zinc-600 bg-zinc-800"
+                />
+                <div className="flex items-center gap-2 text-green-400 text-xs">
+                  <CheckCircle className="w-3 h-3" />
+                  Processing successful
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-red-400 text-sm">
+                <XCircle className="w-4 h-4" />
+                <span>Failed: {technique.error || "Unknown error"}</span>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Technical Summary */}
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
+            View technical details
+          </summary>
+          <div className="mt-2 p-3 bg-zinc-900 rounded border border-zinc-700">
+            <pre className="text-xs text-zinc-300 whitespace-pre-wrap overflow-auto max-h-64">
+              {JSON.stringify(data, null, 2)}
+            </pre>
+          </div>
+        </details>
+      </div>
+    );
+  };
+
+  const renderCustomTrOCRResult = (data: any) => {
+    return (
+      <div className="space-y-4">
+        {/* Custom Model Information */}
+        <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 p-4 rounded-lg border border-purple-700">
+          <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            <Brain className="w-5 h-5 text-purple-400" />
+            Custom TrOCR Model Results
+          </h3>
+          
+          {data.model_info && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400 text-xs">Training Dataset</div>
+                <div className="text-white font-medium">Kaggle Prescriptions</div>
+              </div>
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400 text-xs">Training Samples</div>
+                <div className="text-white font-medium">{data.model_info.training_samples}</div>
+              </div>
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400 text-xs">Training Epochs</div>
+                <div className="text-white font-medium">{data.model_info.epochs}</div>
+              </div>
+              <div className="bg-zinc-800/50 p-2 rounded">
+                <div className="text-zinc-400 text-xs">Processing Time</div>
+                <div className="text-white font-medium">{data.processing_time}s</div>
+              </div>
+            </div>
+          )}
+
+          {data.device && (
+            <div className="text-sm text-purple-300 bg-purple-900/20 p-2 rounded">
+              🚀 Processed using: {data.device.includes('cuda') ? 'NVIDIA RTX 4060 GPU' : 'CPU'}
+            </div>
+          )}
+        </div>
+
+        {/* Extracted Text */}
+        <div className="bg-zinc-900 p-4 rounded-lg border border-zinc-700">
+          <h4 className="text-md font-semibold text-white mb-3 flex items-center gap-2">
+            <FileImage className="w-4 h-4 text-blue-400" />
+            Extracted Prescription Text
+          </h4>
+          
+          {data.extracted_text ? (
+            <div className="bg-zinc-800 p-3 rounded border border-zinc-600">
+              <pre className="text-sm text-zinc-200 whitespace-pre-wrap font-mono">
+                {data.extracted_text}
+              </pre>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-amber-400">
+              <AlertTriangle className="w-4 h-4" />
+              <span>No text extracted from the image</span>
+            </div>
+          )}
+
+          {/* Model Performance Info */}
+          <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+            <div className="bg-zinc-800/50 p-2 rounded">
+              <div className="text-zinc-400">Confidence</div>
+              <div className="text-white font-medium">{Math.round((data.confidence || 0.85) * 100)}%</div>
+            </div>
+            <div className="bg-zinc-800/50 p-2 rounded">
+              <div className="text-zinc-400">Model Status</div>
+              <div className={`font-medium ${data.success ? 'text-green-400' : 'text-red-400'}`}>
+                {data.success ? 'Success' : 'Failed'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Technical Details */}
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
+            View technical details
+          </summary>
+          <div className="mt-2 p-3 bg-zinc-900 rounded border border-zinc-700">
+            <pre className="text-xs text-zinc-300 whitespace-pre-wrap overflow-auto max-h-64">
+              {JSON.stringify(data, null, 2)}
+            </pre>
+          </div>
+        </details>
+      </div>
+    );
+  };
 
   const renderPrescriptionResult = (data: any) => {
     // Handle both basic and advanced response formats
@@ -479,7 +663,9 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
           <Button
             variant={ocrMode === "image" ? "default" : "outline"}
             size="sm"
-            onClick={() => setOcrMode("image")}
+            onClick={() => {
+              setOcrMode("image");
+            }}
             className="flex items-center gap-2"
           >
             <Eye className="w-4 h-4" />
@@ -488,7 +674,9 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
           <Button
             variant={ocrMode === "prescription" ? "default" : "outline"}
             size="sm"
-            onClick={() => setOcrMode("prescription")}
+            onClick={() => {
+              setOcrMode("prescription");
+            }}
             className="flex items-center gap-2"
           >
             <Pill className="w-4 h-4" />
@@ -497,11 +685,24 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
           <Button
             variant={ocrMode === "advanced" ? "default" : "outline"}
             size="sm"
-            onClick={() => setOcrMode("advanced")}
+            onClick={() => {
+              setOcrMode("advanced");
+            }}
             className="flex items-center gap-2"
           >
             <CheckCircle className="w-4 h-4" />
             Advanced OCR + Validation
+          </Button>
+          <Button
+            variant={ocrMode === "custom" ? "default" : "outline"}
+            size="sm"
+            onClick={() => {
+              setOcrMode("custom");
+            }}
+            className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+          >
+            <Brain className="w-4 h-4" />
+            Custom TrOCR Model
           </Button>
         </div>
         
@@ -651,7 +852,24 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
         {/* Image Preview */}
         {imageUrl && (
           <div className="space-y-3">
-            <h4 className="font-medium text-zinc-200">Uploaded Image</h4>
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-zinc-200">Uploaded Image</h4>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setImageUrl(null);
+                  setResults({});
+                  setError(null);
+                  if (fileInput.current) {
+                    fileInput.current.value = "";
+                  }
+                }}
+                className="text-xs"
+              >
+                Upload New Image
+              </Button>
+            </div>
             <div className="relative">
               <img 
                 src={imageUrl} 
@@ -678,11 +896,16 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
           </div>
         )}
 
-        {/* Results Display */}
-        {result && !loading && (
+        {/* Results Display - Only show result for current mode */}
+        {results[ocrMode] && !loading && (
           <div className="space-y-3">
             <h4 className="font-medium text-zinc-200 flex items-center gap-2">
-              {ocrMode === "prescription" || ocrMode === "advanced" ? (
+              {ocrMode === "custom" ? (
+                <>
+                  <Brain className="w-4 h-4 text-purple-400" />
+                  Custom TrOCR Model Analysis
+                </>
+              ) : ocrMode === "prescription" || ocrMode === "advanced" ? (
                 <>
                   <Pill className="w-4 h-4" />
                   {ocrMode === "advanced" ? "Advanced Prescription Analysis" : "Prescription Analysis"}
@@ -694,12 +917,16 @@ export function ImageUpload({ onResult }: { onResult: (result: any) => void }) {
                 </>
               )}
             </h4>
-            {ocrMode === "prescription" || ocrMode === "advanced" ? (
-              renderPrescriptionResult(result)
+            {ocrMode === "custom" ? (
+              renderCustomTrOCRResult(results[ocrMode])
+            ) : ocrMode === "prescription" || ocrMode === "advanced" ? (
+              renderPrescriptionResult(results[ocrMode])
+            ) : ocrMode === "image" ? (
+              renderImageProcessingShowcase(results[ocrMode])
             ) : (
               <div className="bg-zinc-800 p-4 rounded-lg border border-zinc-700">
                 <pre className="text-xs text-zinc-200 whitespace-pre-wrap overflow-auto max-h-64">
-                  {JSON.stringify(result, null, 2)}
+                  {JSON.stringify(results[ocrMode], null, 2)}
                 </pre>
               </div>
             )}

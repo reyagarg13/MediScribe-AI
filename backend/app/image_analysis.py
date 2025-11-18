@@ -27,6 +27,7 @@ except Exception:
 import base64
 from typing import Dict, Any
 from .prescription_ocr import analyze_prescription_image
+from .custom_trocr import analyze_prescription_with_custom_trocr, TROCR_AVAILABLE
 
 router = APIRouter()
 
@@ -40,27 +41,24 @@ model = DummyImageModel()
 
 @router.post("/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
+    """
+    Image Analysis - Showcase all implemented image processing techniques.
+    Demonstrates: Sampling & Quantization, CLAHE, Gaussian Blur, Edge Detection,
+    Morphological Operations, Histogram Equalization, Noise Reduction
+    """
     contents = await file.read()
     image = Image.open(io.BytesIO(contents)).convert("RGB")
 
-    # Run model prediction on original (dummy for now)
-    result = model.predict(image)
-
-    # Enhance image for debugging/visualization
+    # Process image with all techniques and return visual results
     try:
-        enhanced_buf, metadata = enhance_image(contents)
-        enhanced_b64 = base64.b64encode(enhanced_buf.getvalue()).decode("utf-8")
+        results = showcase_image_processing_techniques(contents)
+        return JSONResponse(content=results)
     except Exception as e:
-        enhanced_b64 = None
-        metadata = {"error": str(e)}
-
-    response: Dict[str, Any] = {
-        "model": result,
-        "enhanced_image_base64": enhanced_b64,
-        "preprocessing": metadata,
-    }
-
-    return JSONResponse(content=response)
+        return JSONResponse(content={
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to showcase image processing techniques"
+        }, status_code=500)
 
 
 @router.post("/prescription-ocr")
@@ -243,6 +241,293 @@ async def prescription_ocr_advanced(
             "method": "advanced_ocr_with_validation"
         }, status_code=500)
 
+
+@router.post("/prescription-custom-trocr")
+async def prescription_custom_trocr(file: UploadFile = File(...)):
+    """
+    Custom TrOCR prescription analysis using the fine-tuned model.
+    This is your trained model on Kaggle prescription dataset!
+    """
+    
+    if not TROCR_AVAILABLE:
+        return JSONResponse(content={
+            "status": "error",
+            "error": "Custom TrOCR not available - transformers library missing",
+            "method": "custom_trocr"
+        }, status_code=500)
+    
+    try:
+        import time
+        import tempfile
+        import os
+        
+        start_time = time.time()
+        contents = await file.read()
+        
+        # Save uploaded file temporarily for processing
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
+            tmp_file.write(contents)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            # Run custom TrOCR analysis
+            result = analyze_prescription_with_custom_trocr(tmp_file_path)
+            
+            # Add processing metadata
+            total_time = time.time() - start_time
+            result.update({
+                "status": "success" if result["success"] else "error",
+                "processing_time": round(total_time, 3),
+                "file_info": {
+                    "filename": file.filename,
+                    "size": len(contents),
+                    "content_type": file.content_type
+                },
+                "model_info": {
+                    "type": "custom_trained_trocr",
+                    "training_dataset": "kaggle_prescription_images",
+                    "training_samples": 20,
+                    "epochs": 30,
+                    "base_model": "microsoft/trocr-base-handwritten"
+                }
+            })
+            
+            return JSONResponse(content=result)
+            
+        finally:
+            # Cleanup temporary file
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+        
+    except Exception as e:
+        import traceback
+        return JSONResponse(content={
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "method": "custom_trocr"
+        }, status_code=500)
+
+
+def showcase_image_processing_techniques(image_bytes: bytes) -> Dict[str, Any]:
+    """
+    Showcase all implemented image processing techniques with visual outputs.
+    Returns base64 encoded results for each technique.
+    """
+    if not CV2_AVAILABLE or cv2 is None or np is None:
+        return {
+            "status": "error",
+            "error": "OpenCV not available - image processing techniques cannot be demonstrated"
+        }
+    
+    try:
+        # Load original image
+        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        original_img = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+        
+        # Resize for processing if too large
+        h, w = original_img.shape[:2]
+        max_dim = 1200
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            original_img = cv2.resize(original_img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        
+        results = {
+            "status": "success",
+            "original_size": {"width": w, "height": h},
+            "techniques": {}
+        }
+        
+        # Convert original to base64
+        results["original_image"] = image_to_base64(cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB))
+        
+        # 1. Sampling & Quantization
+        try:
+            quantized_img = apply_quantization(original_img)
+            results["techniques"]["sampling_quantization"] = {
+                "title": "Sampling & Quantization",
+                "description": "Reduces color levels to simulate lower bit-depth images",
+                "image": image_to_base64(cv2.cvtColor(quantized_img, cv2.COLOR_BGR2RGB)),
+                "success": True
+            }
+        except Exception as e:
+            results["techniques"]["sampling_quantization"] = {
+                "title": "Sampling & Quantization", 
+                "error": str(e),
+                "success": False
+            }
+        
+        # 2. CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        try:
+            clahe_img = apply_clahe(original_img)
+            results["techniques"]["clahe"] = {
+                "title": "CLAHE (Contrast Limited Adaptive Histogram Equalization)",
+                "description": "Enhances contrast while preventing noise amplification",
+                "image": image_to_base64(cv2.cvtColor(clahe_img, cv2.COLOR_BGR2RGB)),
+                "success": True
+            }
+        except Exception as e:
+            results["techniques"]["clahe"] = {
+                "title": "CLAHE",
+                "error": str(e),
+                "success": False
+            }
+        
+        # 3. Gaussian Blur
+        try:
+            blur_img = apply_gaussian_blur(original_img)
+            results["techniques"]["gaussian_blur"] = {
+                "title": "Gaussian Blur",
+                "description": "Smooths image and reduces noise using Gaussian kernel",
+                "image": image_to_base64(cv2.cvtColor(blur_img, cv2.COLOR_BGR2RGB)),
+                "success": True
+            }
+        except Exception as e:
+            results["techniques"]["gaussian_blur"] = {
+                "title": "Gaussian Blur",
+                "error": str(e),
+                "success": False
+            }
+        
+        # 4. Edge Detection
+        try:
+            edges_img = apply_edge_detection(original_img)
+            results["techniques"]["edge_detection"] = {
+                "title": "Edge Detection (Canny)",
+                "description": "Detects edges and boundaries in the image",
+                "image": image_to_base64(edges_img),
+                "success": True
+            }
+        except Exception as e:
+            results["techniques"]["edge_detection"] = {
+                "title": "Edge Detection",
+                "error": str(e),
+                "success": False
+            }
+        
+        # 5. Morphological Operations
+        try:
+            morph_img = apply_morphological_operations(original_img)
+            results["techniques"]["morphological_operations"] = {
+                "title": "Morphological Operations",
+                "description": "Erosion and dilation to clean up image structure",
+                "image": image_to_base64(cv2.cvtColor(morph_img, cv2.COLOR_BGR2RGB)),
+                "success": True
+            }
+        except Exception as e:
+            results["techniques"]["morphological_operations"] = {
+                "title": "Morphological Operations",
+                "error": str(e),
+                "success": False
+            }
+        
+        # 6. Histogram Equalization
+        try:
+            hist_eq_img = apply_histogram_equalization(original_img)
+            results["techniques"]["histogram_equalization"] = {
+                "title": "Histogram Equalization",
+                "description": "Improves contrast by spreading out intensity distribution",
+                "image": image_to_base64(cv2.cvtColor(hist_eq_img, cv2.COLOR_BGR2RGB)),
+                "success": True
+            }
+        except Exception as e:
+            results["techniques"]["histogram_equalization"] = {
+                "title": "Histogram Equalization",
+                "error": str(e),
+                "success": False
+            }
+        
+        # 7. Noise Reduction
+        try:
+            denoised_img = apply_noise_reduction(original_img)
+            results["techniques"]["noise_reduction"] = {
+                "title": "Noise Reduction",
+                "description": "Removes noise while preserving important details",
+                "image": image_to_base64(cv2.cvtColor(denoised_img, cv2.COLOR_BGR2RGB)),
+                "success": True
+            }
+        except Exception as e:
+            results["techniques"]["noise_reduction"] = {
+                "title": "Noise Reduction",
+                "error": str(e),
+                "success": False
+            }
+        
+        return results
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to process image with showcase techniques"
+        }
+
+def image_to_base64(img_array: np.ndarray) -> str:
+    """Convert numpy image array to base64 string."""
+    if len(img_array.shape) == 3:
+        # Color image
+        pil_img = Image.fromarray(img_array)
+    else:
+        # Grayscale image
+        pil_img = Image.fromarray(img_array, mode='L')
+    
+    buf = io.BytesIO()
+    pil_img.save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+def apply_quantization(img: np.ndarray, levels: int = 32) -> np.ndarray:
+    """Apply color quantization to reduce bit depth."""
+    # Quantize each channel
+    quantized = img.copy()
+    quantized = (quantized // (256 // levels)) * (256 // levels)
+    return quantized
+
+def apply_clahe(img: np.ndarray) -> np.ndarray:
+    """Apply CLAHE for contrast enhancement."""
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    cl = clahe.apply(l)
+    enhanced = cv2.merge((cl, a, b))
+    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+def apply_gaussian_blur(img: np.ndarray) -> np.ndarray:
+    """Apply Gaussian blur for noise reduction."""
+    return cv2.GaussianBlur(img, (15, 15), 0)
+
+def apply_edge_detection(img: np.ndarray) -> np.ndarray:
+    """Apply Canny edge detection."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    return edges  # Return grayscale edges
+
+def apply_morphological_operations(img: np.ndarray) -> np.ndarray:
+    """Apply morphological operations (erosion followed by dilation)."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    kernel = np.ones((5,5), np.uint8)
+    
+    # Erosion followed by dilation (opening)
+    opening = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel)
+    
+    # Convert back to BGR for consistency
+    return cv2.cvtColor(opening, cv2.COLOR_GRAY2BGR)
+
+def apply_histogram_equalization(img: np.ndarray) -> np.ndarray:
+    """Apply histogram equalization in LAB color space."""
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    
+    # Apply histogram equalization to L channel
+    l_eq = cv2.equalizeHist(l)
+    
+    # Merge channels and convert back
+    lab_eq = cv2.merge((l_eq, a, b))
+    return cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
+
+def apply_noise_reduction(img: np.ndarray) -> np.ndarray:
+    """Apply noise reduction using Non-local Means Denoising."""
+    return cv2.fastNlMeansDenoisingColored(img, None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21)
 
 def enhance_image(image_bytes: bytes):
     """Return a BytesIO buffer with enhanced image and metadata dict.

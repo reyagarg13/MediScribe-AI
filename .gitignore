@@ -13,9 +13,10 @@ mediscribe_repo/
 node_modules/
 dist/
 build/
-
+MediScribe_ImageAndVideoProcessing/data/
 # VS Code
 .vscode/
+backend/app/trocr_gemini_teacher_demo/
 
 # Audio files (optional if you don't want them)
 *.wav
