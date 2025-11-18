@@ -93,19 +93,54 @@ npm run dev
 ```
 
 ### Environment Variables
-Create `.env` files in backend and frontend directories:
+
+**⚠️ SECURITY NOTICE: NEVER commit API keys to version control!**
+
+Create `.env` files from the provided examples:
+
+**Backend Setup:**
+```bash
+cd backend
+cp .env.example .env
+# Edit .env and add your actual API keys
+```
+
+**Frontend Setup:**
+```bash
+cd frontend
+cp .env.example .env.local  # Create this file
+# Add your environment variables
+```
+
+**Training Pipeline Setup:**
+```bash
+cd MediScribe_ImageAndVideoProcessing
+cp .env.example .env
+# Edit .env and add your Gemini API keys for training
+```
+
+**Required Environment Variables:**
 
 **Backend `.env`:**
 ```env
 GEMINI_API_KEY=your_gemini_api_key
-OPENAI_API_KEY=your_openai_key (optional)
+GEMINI_API_URL=https://generativelanguage.googleapis.com
 DATABASE_URL=sqlite:///mediscribe.db
+FIREBASE_CREDENTIALS_PATH=./path/to/serviceAccount.json
 ```
 
 **Frontend `.env.local`:**
 ```env
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 NEXT_PUBLIC_GEMINI_API_KEY=your_gemini_api_key
+```
+
+**Training Pipeline `.env`:**
+```env
+GEMINI_API_KEY=your_primary_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_NAME=PRIMARY_GEMINI
+# Optional: Add multiple API keys for rotation
 ```
 
 ## 🔬 Image Processing Techniques

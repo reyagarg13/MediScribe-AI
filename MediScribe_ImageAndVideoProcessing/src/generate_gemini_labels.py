@@ -18,17 +18,31 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def setup_gemini():
-    """Setup Gemini API with key + model rotation for cost efficiency."""
-    # Working API key + model combinations (from test results)
-    api_configs = [
-        ("AIzaSyBSj34wX1CsJuA74jsw-5ChbrUKCuoFNhE", "gemini-2.5-pro", "GEMINI 1.5 FLASH"),
-        ("AIzaSyCGY51vvMSYwX_pY_EcLYWYXBiPMmguY64", "gemini-2.5-pro", "GEMINI 2.0 FLASH EXP"),
-        ("AIzaSyAwDJSZ2dpGbnJq4NnAdHjUBdbVXIwiVIw", "gemini-2.5-flash", "GEMINI 2.5 FLASH"),  # Use cheaper flash
-        ("AIzaSyCHF2oxoG43oN1vyqDCcUmKOU_Yxr-vEFI", "gemini-2.5-pro", "GEMINI 2.5 PRO"),
-        ("AIzaSyBzx3IsaPl6NM-7R_qJ69Rf8hzwsci-Pf4", "gemini-2.5-flash", "PALLAV MAIN"),  # Use cheaper flash
-        ("AIzaSyB9078EC0wXNRwtknr3IigQGU8US-xq4Oo", "gemini-2.5-flash", "PYTHON ACCOUNT"),  # Use cheaper flash
-        ("AIzaSyBQtZ1eNBAPDMNBoKSUR7kYIQFncQvfoZo", "gemini-2.5-pro", "PALLAV FOZO")
-    ]
+    """Setup Gemini API with environment variables."""
+    import os
+    from dotenv import load_dotenv
+    
+    # Load environment variables
+    load_dotenv()
+    
+    # Get API keys from environment variables
+    api_configs = []
+    
+    # Try to load multiple API keys from environment
+    for i in range(1, 8):  # Support up to 7 API keys
+        api_key_var = f"GEMINI_API_KEY_{i}" if i > 1 else "GEMINI_API_KEY"
+        model_var = f"GEMINI_MODEL_{i}" if i > 1 else "GEMINI_MODEL"
+        name_var = f"GEMINI_NAME_{i}" if i > 1 else "GEMINI_NAME"
+        
+        api_key = os.getenv(api_key_var)
+        model_name = os.getenv(model_var, "gemini-2.5-flash")  # Default to cheaper model
+        name = os.getenv(name_var, f"GEMINI_CONFIG_{i}")
+        
+        if api_key:
+            api_configs.append((api_key, model_name, name))
+    
+    if not api_configs:
+        raise ValueError("No Gemini API keys found in environment variables. Please set GEMINI_API_KEY in .env file")
     
     # Try each configuration until one works
     for i, (api_key, model_name, name) in enumerate(api_configs):
